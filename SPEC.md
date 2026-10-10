@@ -142,12 +142,13 @@ object Core(dataDir: String, relay: RelayConfig)
   fun endpointId(): String
   fun pair(ticketUri: String, deviceName: String): BridgeInfo
   fun connect(bridge: BridgeInfo): Tunnel        // throws on timeout/denied
-class Tunnel { fun openStream(): Stream; fun startLoopbackProxy(): LoopbackProxy; fun close() }
-class Stream { fun read(max: UInt): ByteArray /* empty = EOF */; fun write(b: ByteArray); fun shutdownWrite(); fun close() }
+class Tunnel { fun openStream(): Stream; fun startLoopbackProxy(): LoopbackProxy; fun disconnect() }
+class Stream { fun read(max: UInt, timeoutMs: UInt /* 0 = none */): ByteArray /* empty = EOF */; fun write(b: ByteArray); fun shutdownWrite(); fun disconnect() }
+// `disconnect`, not `close`: uniffi's generated AutoCloseable.close() would clash.
 class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
 ```
 
-- **Multiple servers:** one `Core` / Endpoint for the whole app. `connect()` is called per server, and several Tunnels can be live at once.
+- **Multiple servers:** one `Core` / Endpoint for the whole app. `connect()` is called per server, and several Tunnels can be live at once. The relay in `BridgeInfo` is informational for now; per-server relay is handled in ticket 12.
 - **LoopbackProxy** (for the dashboard WebView only):
   - Binds `127.0.0.1:0`; the token is random 128-bit, lowercase base32 (valid DNS label).
   - Per accepted TCP conn: peek the HTTP request head (up to 8 KiB) and require `Host: <token>.localhost:<port>`. On mismatch, reply 403 and close.
@@ -254,7 +255,7 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
   1. `connect` the active server.
   2. `startLoopbackProxy()`.
   3. Load `http://<token>.localhost:<port>/?external_auth=1`.
-- **On pause/stop:** `proxy.stop()` + `tunnel.close()` (no warm keeping). Accept the reload on return. WebView keeps its cache, but the port and token change, so the origin changes too.
+- **On pause/stop:** `proxy.stop()` + `tunnel.disconnect()` (no warm keeping). Accept the reload on return. WebView keeps its cache, but the port and token change, so the origin changes too.
   - Consequence: frontend localStorage is per-origin and lost. Fine, because auth comes from external_auth.
   - If that's annoying, pin the port/token per server (persisted) so the origin is stable. Decide during implementation.
 - **WebView settings:** JS on, DOM storage on, mixed content irrelevant (plain http on localhost is a secure context in Chromium). Media autoplay for camera streams if needed.
