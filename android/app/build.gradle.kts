@@ -15,7 +15,7 @@ android {
         versionCode = 1
         versionName = "0.1"
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
 }
 
 dependencies {
@@ -31,6 +31,7 @@ dependencies {
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("androidx.browser:browser:1.10.0")
     implementation("androidx.webkit:webkit:1.17.1")
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     val camerax = "1.6.2"
     implementation("androidx.camera:camera-core:$camerax")
     implementation("androidx.camera:camera-camera2:$camerax")
