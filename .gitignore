@@ -8,3 +8,5 @@ android/app/src/main/jniLibs/
 android/.idea/
 android/.kotlin/
 *.key
+.venv-ha/
+__pycache__/

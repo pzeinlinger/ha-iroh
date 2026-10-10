@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HA iroh",
+        "description": "Start the ha-iroh bridge so the Android app can reach Home Assistant over iroh."
+      }
+    },
+    "abort": {
+      "already_configured": "HA iroh is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "pair": "Add device",
+          "settings": "Settings"
+        }
+      },
+      "pair": {
+        "title": "Add device",
+        "description": "Scan this code with the ha-iroh Android app, or paste the link into it:\n\n`{uri}`\n\nThe code works once and expires after 10 minutes. Submit to close."
+      },
+      "settings": {
+        "title": "Settings",
+        "data": {
+          "name": "Bridge name",
+          "relay": "Relay"
+        },
+        "data_description": {
+          "relay": "\"n0\" for the default relays, or comma-separated relay URLs."
+        }
+      }
+    },
+    "error": {
+      "invalid_relay": "Use \"n0\" or comma-separated http(s) URLs."
+    },
+    "abort": {
+      "bridge_unavailable": "The bridge is not running. Check the logs."
+    }
+  }
+}
