@@ -1,5 +1,6 @@
 package dev.ha_iroh.app
 
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
@@ -56,7 +57,7 @@ class IrohSocket(private val tunnel: Tunnel) : Socket() {
 
     override fun shutdownOutput() {
         outShut = true
-        s().shutdownWrite()
+        try { s().shutdownWrite() } catch (e: CoreException) { throw IOException(e) }
     }
 
     override fun shutdownInput() {
@@ -82,6 +83,8 @@ class IrohSocket(private val tunnel: Tunnel) : Socket() {
                 throw SocketTimeoutException("read timed out")
             } catch (e: CoreException.Closed) {
                 throw SocketException("closed")
+            } catch (e: CoreException) {
+                throw IOException(e) // OkHttp background threads only tolerate IOException
             }
             if (data.isEmpty()) return -1
             data.copyInto(b, off)
@@ -91,7 +94,10 @@ class IrohSocket(private val tunnel: Tunnel) : Socket() {
 
     override fun getOutputStream(): OutputStream = object : OutputStream() {
         override fun write(b: Int) = write(byteArrayOf(b.toByte()), 0, 1)
-        override fun write(b: ByteArray, off: Int, len: Int) = s().write(b.copyOfRange(off, off + len))
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            // tunnel already gone (e.g. close frame written after disconnect) must not crash OkHttp's writer thread
+            try { s().write(b.copyOfRange(off, off + len)) } catch (e: CoreException) { throw IOException(e) }
+        }
     }
 }
 

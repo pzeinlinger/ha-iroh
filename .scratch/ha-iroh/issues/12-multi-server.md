@@ -15,3 +15,5 @@ Covers: parallel connects grouped by `serverId` in `createPublisherFor`, per-ser
 - [ ] Control tap opens the correct server's dashboard
 
 Also: honor `BridgeInfo.relay` in `Core.connect` (ticket 05 ignores it).
+
+Also: no mid-stream reconnect in Device Controls yet (ticket 07); a dropped tunnel leaves tiles in error until the panel is reopened. Decide whether to reconnect here.

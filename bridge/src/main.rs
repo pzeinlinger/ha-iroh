@@ -77,9 +77,12 @@ async fn command(bridge: &Bridge, ep: &Endpoint, line: &str) -> Value {
     let req = serde_json::from_str::<Value>(line).unwrap_or_default();
     match req["cmd"].as_str() {
         Some("pair") => {
-            // let the relay URL land in the ticket; offline is fine, direct addrs still work
-            let _ = tokio::time::timeout(Duration::from_secs(3), ep.online()).await;
+            // the ticket must carry the relay URL, or a phone off the LAN can't reach us
+            let _ = tokio::time::timeout(Duration::from_secs(10), ep.online()).await;
             let t = bridge.mint_code();
+            if t.addr.relay_urls().next().is_none() {
+                tracing::warn!("ticket has no relay URL yet; only reachable on the LAN");
+            }
             json!({"ok": true, "ticket": t.to_uri(), "code": t.code})
         }
         Some("list") => json!({"ok": true, "devices": bridge.list()}),

@@ -1,6 +1,19 @@
 package dev.ha_iroh.app
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -52,21 +65,66 @@ internal fun JsonObject.str(k: String) = (this[k] as? JsonPrimitive)?.contentOrN
 /** Refresh token rejected (revoked / unknown) or WS auth_invalid. */
 class ReloginRequired : Exception("re-login required")
 
-class Session internal constructor(private val ws: WebSocket, private val inbox: Channel<JsonObject>) {
-    private var nextId = 1
+/** `result` with success=false. */
+class HaError(val code: String?, message: String) : Exception(message)
 
-    /** Sends a command and returns its `result` message. ponytail: drops events; 07 adds subscriptions. */
-    suspend fun sendCommand(cmd: JsonObject): JsonObject {
-        val id = nextId++
-        ws.send(JsonObject(cmd + ("id" to JsonPrimitive(id))).toString())
-        return withTimeout(TIMEOUT_MS) {
-            var m: JsonObject
-            do { m = inbox.receive() } while (m["id"]?.jsonPrimitive?.intOrNull != id)
-            m
+/** Reader loop dispatches by message id: `result` -> pending command, `event` -> subscription. */
+class Session internal constructor(private val ws: WebSocket, inbox: ReceiveChannel<JsonObject>) {
+    private val nextId = AtomicInteger(1)
+    private val pending = ConcurrentHashMap<Int, CompletableDeferred<JsonObject>>()
+    private val subscriptions = ConcurrentHashMap<Int, SendChannel<JsonObject>>()
+    private val reader = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+        var cause: Throwable? = null
+        try {
+            for (m in inbox) {
+                val id = m["id"]?.jsonPrimitive?.intOrNull ?: continue
+                when (m["type"]?.jsonPrimitive?.content) {
+                    "result" -> pending.remove(id)?.complete(m)
+                    "event" -> subscriptions[id]?.trySend(m["event"]!!.jsonObject)
+                }
+            }
+        } catch (e: CancellationException) { // close()
+            cause = IOException("session closed")
+        } catch (e: Throwable) { cause = e } finally {
+            val err = cause ?: IOException("websocket closed")
+            pending.values.forEach { it.completeExceptionally(err) }
+            subscriptions.values.forEach { it.close(err) }
         }
     }
 
-    fun close() { ws.close(1000, null) }
+    private suspend fun request(cmd: JsonObject, id: Int): JsonObject {
+        val d = CompletableDeferred<JsonObject>().also { pending[id] = it }
+        try {
+            // registered first, so a reader that finishes later still fails [d]; one that already finished is caught here
+            if (!reader.isActive) throw IOException("session closed")
+            if (!ws.send(JsonObject(cmd + ("id" to JsonPrimitive(id))).toString())) throw IOException("websocket send failed")
+            val m = withTimeout(TIMEOUT_MS) { d.await() }
+            if (m["success"]?.jsonPrimitive?.booleanOrNull == false) {
+                val e = m["error"]?.jsonObject
+                throw HaError(e?.get("code")?.jsonPrimitive?.contentOrNull, e?.get("message")?.jsonPrimitive?.contentOrNull ?: "command failed")
+            }
+            return m
+        } finally { pending.remove(id) }
+    }
+
+    /** Sends a command and returns its `result` message; throws [HaError] on success=false. */
+    suspend fun sendCommand(cmd: JsonObject): JsonObject = request(cmd, nextId.getAndIncrement())
+
+    /** Emits each `event` payload of the subscription; unsubscribes on cancel. */
+    fun subscribe(cmd: JsonObject): Flow<JsonObject> = callbackFlow {
+        val id = nextId.getAndIncrement()
+        subscriptions[id] = channel
+        try { request(cmd, id) } catch (e: Throwable) { subscriptions.remove(id); throw e }
+        awaitClose {
+            subscriptions.remove(id)
+            ws.send(buildJsonObject { put("id", nextId.getAndIncrement()); put("type", "unsubscribe_events"); put("subscription", id) }.toString())
+        }
+    }.buffer(Channel.UNLIMITED)
+
+    fun close() {
+        ws.close(1000, null)
+        reader.cancel() // finally block fails pending + closes subscriptions
+    }
 }
 
 /**
@@ -103,7 +161,8 @@ class HaClient(
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     try { inbox.trySend(json.parseToJsonElement(text).jsonObject) } catch (e: Exception) { inbox.close(e) }
                 }
-                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { inbox.close() }
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(code, null) }
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { inbox.close(IOException("websocket closed: $code $reason")) }
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { inbox.close(t) }
             })
         }
