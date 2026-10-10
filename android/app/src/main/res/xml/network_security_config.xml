@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ha.iroh never touches the network: bytes ride the (encrypted) iroh tunnel. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">ha.iroh</domain>
+    </domain-config>
+</network-security-config>
