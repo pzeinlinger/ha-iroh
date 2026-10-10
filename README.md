@@ -53,6 +53,8 @@ Start a pairing by writing one line:
 # {"event":"paired","endpoint_id":"...","device_name":"..."}   (after a client pairs)
 ```
 
+Also: `{"cmd":"list"}` gives `{"ok":true,"devices":[{endpoint_id,device_name,added_at}]}`. `{"cmd":"revoke","endpoint_id":"..."}` gives `{"ok":true}` or `{"ok":false,"error":"not_found"}` and closes that device's live connections. `not_found` means the id was not paired (already revoked); `internal` means the allowlist could not be written.
+
 The ticket URI is what the HA integration will render as a QR code. Codes are single use and expire after `pair_ttl`.
 Paired devices are appended to the allowlist and take effect immediately.
 

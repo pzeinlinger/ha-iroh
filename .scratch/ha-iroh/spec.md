@@ -114,7 +114,7 @@ URI: `ha-iroh://pair?t=<base64url(JSON)>`
 - **Admin channel: stdio, JSON lines.** The parent (HA integration, or a human in a terminal) writes one JSON request per line on stdin, the bridge answers one JSON line on stdout. No unix socket; the daemon owns the key, nobody else opens an Endpoint.
   - `{"cmd":"pair"}` → `{"ok":true,"ticket":"ha-iroh://pair?t=...","code":"..."}` (daemon mints a one-time code)
   - `{"cmd":"list"}` → `{"ok":true,"devices":[{endpoint_id, device_name, added_at}]}`
-  - `{"cmd":"revoke","endpoint_id":"..."}` → `{"ok":true}`; also kills live connections from that id
+  - `{"cmd":"revoke","endpoint_id":"..."}` → `{"ok":true}`; also kills live connections from that id. Errors: `not_found` (unknown id), `internal` (allowlist persist failed), `bad_request`
   - Unsolicited event lines: `{"event":"paired","endpoint_id":...,"device_name":...}` so the integration can create the device without polling.
   - Responses carry no request id: commands are processed one at a time in order; a stdout line with an `event` key is an event, anything else is the response to the oldest unanswered command.
   - `ready` is printed only after the key and allowlist loaded successfully; stdin EOF or SIGTERM stops the daemon.
@@ -127,7 +127,7 @@ URI: `ha-iroh://pair?t=<base64url(JSON)>`
 - Installable via HACS (custom repository) or by copying the folder. Works on HA Container, Core, OS.
 - One config entry. Setup: write `bridge.toml` + key + allowlist under `<config>/ha_iroh/`, spawn `ha-iroh-bridge run` with `asyncio.create_subprocess_exec`, read stdout lines, restart with backoff on exit. Stop on unload.
 - Options flow / "Add device": send `pair`, show the ticket with HA's `QrCodeSelector` plus the URI as text. On the `paired` event, create a device in the device registry (identifiers `(ha_iroh, endpoint_id)`, name = device_name, model "ha-iroh app").
-- `async_remove_config_entry_device`: send `revoke`, return `True`.
+- `async_remove_config_entry_device`: send `revoke`, return `True`. `not_found` counts as success (idempotent removal).
 - Options: relay (`n0` / custom URLs), bridge name. Changing options rewrites the TOML and restarts the subprocess.
 - Diagnostics: endpoint id, device list, subprocess state. No secrets.
 - Python: HA's bundled version, no extra Python deps beyond the wheel.

@@ -74,17 +74,24 @@ async fn main() -> anyhow::Result<()> {
 
 async fn command(bridge: &Bridge, ep: &Endpoint, line: &str) -> Value {
     let bad = json!({"ok": false, "error": "bad_request"});
-    match serde_json::from_str::<Value>(line)
-        .ok()
-        .as_ref()
-        .and_then(|v| v["cmd"].as_str())
-    {
+    let req = serde_json::from_str::<Value>(line).unwrap_or_default();
+    match req["cmd"].as_str() {
         Some("pair") => {
             // let the relay URL land in the ticket; offline is fine, direct addrs still work
             let _ = tokio::time::timeout(Duration::from_secs(3), ep.online()).await;
             let t = bridge.mint_code();
             json!({"ok": true, "ticket": t.to_uri(), "code": t.code})
         }
+        Some("list") => json!({"ok": true, "devices": bridge.list()}),
+        Some("revoke") => match req["endpoint_id"].as_str().map(|id| bridge.revoke(id)) {
+            None => bad,
+            Some(Ok(true)) => json!({"ok": true}),
+            Some(Ok(false)) => json!({"ok": false, "error": "not_found"}),
+            Some(Err(e)) => {
+                tracing::error!("revoke failed: {e:#}");
+                json!({"ok": false, "error": "internal"})
+            }
+        },
         _ => bad,
     }
 }
