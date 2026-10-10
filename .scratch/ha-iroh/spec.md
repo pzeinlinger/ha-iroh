@@ -20,7 +20,8 @@ Everything else from the official HA app is out of scope: no sensors, no notific
 |---|---|
 | Min Android | **12 (minSdk 31)**, target latest |
 | App stack | Kotlin + Jetpack Compose, Rust core via **uniffi** + **cargo-ndk** |
-| Bridge | Rust sidecar on HA host, **dumb pipe**: iroh bi-stream ⇄ TCP to HA:8123 |
+| Bridge | Rust binary, **dumb pipe**: iroh bi-stream ⇄ TCP to HA:8123. Shipped as a PyPI platform wheel and run as a subprocess by a **HA custom integration** (HACS). Must work on HA Container (no Supervisor/add-ons) |
+| Device management | Paired phones are HA **devices** of the `ha_iroh` integration: pairing QR via config flow, delete device = revoke |
 | HA auth | On phone, via HA **`/auth/login_flow`** native form (username/password + MFA steps) → refresh token |
 | Bridge access | **Allowlist of app EndpointIds**, filled via **QR pairing** with one-time code |
 | Relay | n0 public relays by default, **configurable** (custom relay URLs) |
@@ -32,7 +33,7 @@ Everything else from the official HA app is out of scope: no sensors, no notific
 | Multi-server | One bridge per HA instance. App keeps a server list. **One app EndpointId for all bridges**. Controls grouped per server via `setStructure` |
 | Assist server | Default server in settings + server switcher chip in the sheet |
 | iroh | **1.3.x** (docs.rs latest as of 2026-09-28) |
-| Nix | flake: devshell + bridge package + NixOS module |
+| Nix | devenv shell only. No NixOS module (HA Container is the target) |
 
 ## 3. Architecture
 
@@ -53,16 +54,18 @@ Android app (Kotlin)
 
 The bridge never parses HTTP. All HA semantics (auth, WS API, Assist, frontend) live in the app.
 
+The bridge runs **inside the HA container** as a child process of the `ha_iroh` custom integration, so `ha_addr` is `127.0.0.1:8123`.
+
 ## 4. Repo layout
 
 ```
 ha-iroh/
-├─ flake.nix              # devshell, packages.bridge, nixosModules.default
-├─ nix/module.nix         # services.ha-iroh-bridge
+├─ devenv.nix             # devshell
 ├─ Cargo.toml             # workspace: bridge, core, proto
 ├─ proto/                 # shared: ALPNs, ticket format, pairing msgs (serde)
 ├─ bridge/                # bin: ha-iroh-bridge
 ├─ core/                  # lib (cdylib + uniffi); examples/cli.rs = desktop test client
+├─ custom_components/ha_iroh/  # HA integration: runs the bridge, config flow, devices
 └─ android/               # Gradle project, app module, generated uniffi Kotlin
 ```
 
@@ -77,6 +80,7 @@ ha-iroh/
 - Raw bytes in both directions, no framing. A half-close on either side propagates (`finish()` ⇄ TCP shutdown write).
 - The client must write first: iroh streams appear lazily, and HTTP clients always send first anyway.
 - The bridge logs the peer EndpointId, the device name from the allowlist, and stream counts. No payload logging.
+- Note: HA drops the response if the client half-closes before HA has replied (verified with a raw socket). HTTP clients must not shutdownWrite before reading the response; rely on `Connection: close` / EOF from HA.
 
 ### 5.3 Pairing ticket (QR)
 URI: `ha-iroh://pair?t=<base64url(JSON)>`
@@ -103,17 +107,29 @@ URI: `ha-iroh://pair?t=<base64url(JSON)>`
   - `secret_key_path` (generated on first run, 0600)
   - `allowlist_path`
   - `relay` (`"n0"` or a list of URLs)
-  - `admin_socket` (default `/run/ha-iroh-bridge/admin.sock`)
   - `pair_ttl`
   - `name`
 - **Endpoint:** `Endpoint::builder(presets::N0).alpns(vec![PAIR, TCP]).bind()`. For custom relays, swap the relay map; keep DNS address lookup unless disabled.
-- **Daemon:** `ha-iroh-bridge run`
-- **Admin CLI** (talks to the running daemon via a unix socket, so two endpoints never share a key):
-  - `ha-iroh-bridge pair`: daemon mints a code; CLI prints the ticket as a terminal QR (`qrcode` crate) and as a URI
-  - `ha-iroh-bridge list`
-  - `ha-iroh-bridge revoke <endpoint_id>`: also kills live connections from that id
+- **Daemon:** `ha-iroh-bridge run --config <toml>`. Logs to stderr. Prints `{"event":"ready","endpoint_id":...}` on stdout at start.
+- **Admin channel: stdio, JSON lines.** The parent (HA integration, or a human in a terminal) writes one JSON request per line on stdin, the bridge answers one JSON line on stdout. No unix socket; the daemon owns the key, nobody else opens an Endpoint.
+  - `{"cmd":"pair"}` → `{"ok":true,"ticket":"ha-iroh://pair?t=...","code":"..."}` (daemon mints a one-time code)
+  - `{"cmd":"list"}` → `{"ok":true,"devices":[{endpoint_id, device_name, added_at}]}`
+  - `{"cmd":"revoke","endpoint_id":"..."}` → `{"ok":true}`; also kills live connections from that id
+  - Unsolicited event lines: `{"event":"paired","endpoint_id":...,"device_name":...}` so the integration can create the device without polling.
 - **Allowlist:** TOML, hot reload or in-memory with atomic write.
 - **Size target:** small. Accept loop, `tokio::io::copy_bidirectional`-style forwarding per stream.
+- **Packaging:** static musl binary, published as a PyPI platform wheel `ha-iroh-bridge` (maturin `bindings = "bin"`), tags `musllinux_1_2` + `manylinux` for `x86_64` and `aarch64`. The HA integration lists it in `manifest.json` `requirements`, so HA installs the right binary with pip. No download code in the integration.
+
+## 6b. HA integration (`custom_components/ha_iroh/`)
+
+- Installable via HACS (custom repository) or by copying the folder. Works on HA Container, Core, OS.
+- One config entry. Setup: write `bridge.toml` + key + allowlist under `<config>/ha_iroh/`, spawn `ha-iroh-bridge run` with `asyncio.create_subprocess_exec`, read stdout lines, restart with backoff on exit. Stop on unload.
+- Options flow / "Add device": send `pair`, show the ticket with HA's `QrCodeSelector` plus the URI as text. On the `paired` event, create a device in the device registry (identifiers `(ha_iroh, endpoint_id)`, name = device_name, model "ha-iroh app").
+- `async_remove_config_entry_device`: send `revoke`, return `True`.
+- Options: relay (`n0` / custom URLs), bridge name. Changing options rewrites the TOML and restarts the subprocess.
+- Diagnostics: endpoint id, device list, subprocess state. No secrets.
+- Python: HA's bundled version, no extra Python deps beyond the wheel.
+
 
 ## 7. Rust core (`core/`, uniffi)
 
@@ -256,43 +272,35 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
 - Relay override (n0 / custom URLs)
 - Show own EndpointId
 
-## 9. Nix
+## 9. Dev environment
 
-- **devShell:**
-  - Rust stable with targets `aarch64-linux-android` and `x86_64-linux-android`
-  - `cargo-ndk`, uniffi-bindgen (version matched to the crate)
-  - `androidenv.composeAndroidPackages` (platform 35/36, build-tools, NDK)
-  - JDK 17, gradle
-  - Env: `ANDROID_HOME` / `ANDROID_NDK_HOME`
-- **Shell:** user is on fish, so provide `.envrc` (`use flake`) for direnv and avoid bash-only hooks.
-- **Packages:** `packages.bridge` via crane or rustPlatform. Optional `packages.cli` for the desktop test client.
-- **NixOS module (`services.ha-iroh-bridge`):**
-  - Options: `enable`, `haAddress`, `relay`, `name`, `stateDir` (`/var/lib/ha-iroh-bridge`), `openFirewall` (UDP for direct paths, optional)
-  - systemd: `DynamicUser`, `StateDirectory`, `RuntimeDirectory` for the admin socket, hardening
+- **devenv shell** (`devenv.nix`, `.envrc` with `use devenv`, fish-friendly): Rust stable with targets `aarch64-linux-android`, `x86_64-linux-android`, `cargo-ndk`, uniffi-bindgen, JDK 17, `maturin`. Android SDK/NDK from the system Android Studio install (`ANDROID_HOME` / `ANDROID_NDK_HOME`).
+- **Bridge wheels:** built in CI (GitHub Actions, `maturin` + `cross`/zig for musl aarch64) and published to PyPI on tag. Local dev: `maturin build --release` or plain `cargo build`.
 - APK build stays Gradle (not nixified) for the prototype.
 
 ## 10. Milestones + acceptance
 
 | # | Deliverable | Done when |
 |---|---|---|
-| M0 | flake devshell, workspace skeleton | `nix develop` → `cargo build` + `cargo ndk build` + `./gradlew assembleDebug` all pass |
-| M1 | bridge + proto + desktop cli | `cli pair <uri>` then `cli curl /api/` returns HA's 401 JSON (proves the tunnel). A non-allowlisted id is rejected. `revoke` cuts a live conn |
+| M0 | devenv shell, workspace skeleton | `devenv shell` → `cargo build` + `cargo ndk build` + `./gradlew assembleDebug` all pass |
+| M1 | bridge + proto + desktop cli | `cli pair <uri>` then `cli curl /api/` returns HA's 401 response (proves the tunnel). A non-allowlisted id is rejected. `revoke` over stdin cuts a live conn |
+| M1b | HA integration | HACS install on HA Container → config flow shows QR → `cli pair` creates a device in HA → deleting the device revokes it |
 | M2 | core uniffi + IrohSocket + OkHttp | App debug screen: GET `/api/` through the tunnel shows a response |
 | M3 | QR pairing + login_flow + token storage | Fresh install → scan → login (incl. TOTP MFA) → authenticated WS `auth_ok`. Survives app restart |
 | M4 | Device Controls | Panel shows chosen entities. Toggling a light in HA updates the tile live, and the tile toggles HA. Cached states appear before connect completes |
 | M5 | Assist voice + text | Tile → speak "turn on kitchen light" → light turns on, transcript + reply shown, TTS plays. Text input works |
 | M6 | Dashboard | Main screen shows the HA frontend without a login prompt; live updates work (WS through proxy). A request from another origin/Host to the proxy port gets 403. Leaving the screen closes the port |
 | M7 | Multi-server | Two HA instances paired. Controls panel shows both, grouped per server, live. One server offline → only its controls show an error. Assist + dashboard switcher work |
-| M8 | NixOS module + polish | Bridge runs as a service on NixOS; README with setup steps |
+| M8 | Packaging + polish | Bridge wheel on PyPI for x86_64/aarch64 musl; HACS repo installs cleanly; README with setup steps |
 
 Build the data model multi-server from M3 onward (server list with one entry), so M7 is mostly UI and parallel connects.
 
-Dev env: two HA instances in NixOS containers or Docker (`ghcr.io/home-assistant/home-assistant:stable`) with demo entities, plus an Android emulator API 34+ and one real Android 12 device.
+Dev env: two HA instances in Docker (`ghcr.io/home-assistant/home-assistant:stable`) with demo entities, plus an Android emulator API 34+ and one real Android 12 device.
 
 ## 11. Risks / verify early
 
 1. **HA `ip_ban` / login attempts:** every phone appears to HA as the bridge's IP (usually 127.0.0.1). A few failed logins could ban the bridge IP and lock out **all** devices.
-   - Mitigation: document it. Run the bridge from a dedicated IP/netns, or keep `ip_ban_enabled` thresholds sane.
+   - Mitigation: document it and keep `ip_ban_enabled` thresholds sane. The bridge runs inside the HA container, so a dedicated IP is not an option here.
    - A dumb pipe can't add `X-Forwarded-For`. That would need a tiny HTTP-aware mode later; out of scope.
 2. **login_flow `client_id` / `redirect_uri`:** HA validates IndieAuth-style. Verify which pair is accepted for a native app without an http redirect page.
    - Candidate: reuse the official app's values (`https://home-assistant.io/android` / `homeassistant://auth-callback`).
