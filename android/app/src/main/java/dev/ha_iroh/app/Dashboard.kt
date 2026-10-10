@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -67,10 +68,26 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
     val state = remember { object { val live = AtomicReference<Live?>(null); var job: Job? = null; var script: ScriptHandler? = null } }
 
     val web = remember {
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true) // chrome://inspect over adb
         WebView(ctx).apply {
+            webChromeClient = object : android.webkit.WebChromeClient() {
+                override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
+                    Log.d(TAG, "console ${m.messageLevel()} ${m.sourceId()}:${m.lineNumber()} ${m.message()}"); return true
+                }
+            }
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
+        }
+    }
+    // Pull down at the top of the page = full refresh: new tunnel, new proxy, reload.
+    // WebView must be MATCH_PARENT: with wrap-content params Chromium resolves 100vh / min-height media queries to 0
+    // and the HA frontend's full-height pages (Settings, HACS) render blank.
+    val swipe = remember {
+        SwipeRefreshLayout(ctx).apply {
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            addView(web, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            setOnChildScrollUpCallback { _, _ -> web.scrollY > 0 }
         }
     }
     val modern = remember {
@@ -129,6 +146,10 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
                 return true // never navigate this WebView away from the proxy origin
             }
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) { canBack = view.canGoBack() }
+            override fun onPageFinished(view: WebView, url: String?) { swipe.isRefreshing = false }
+            override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                Log.w(TAG, "renderer gone crash=${detail.didCrash()}"); error = "WebView renderer died; reopen the dashboard"; return true
+            }
         }
         if (!modern) {
             // Fallback: exposed to every frame, so only act while the top-level page is on our origin.
@@ -154,9 +175,7 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
             }
             state.live.getAndSet(null)?.let { l -> Thread { runCatching { l.close() } }.start() }
         }
-        val observer = LifecycleEventObserver { _, e ->
-            if (e == Lifecycle.Event.ON_RESUME) {
-                web.onResume()
+        fun start() {
                 error = null
                 state.job = scope.launch {
                     // Blocking uniffi calls can't be cancelled: they run to completion, then we close if paused meanwhile.
@@ -170,8 +189,8 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
                             } catch (t: Throwable) { tunnel.disconnect(); throw t }
                         }
                     } catch (e: CancellationException) { throw e
-                    } catch (e: ReloginRequired) { onRelogin(); return@launch
-                    } catch (e: Exception) { error = "connect failed: $e"; return@launch }
+                    } catch (e: ReloginRequired) { swipe.isRefreshing = false; onRelogin(); return@launch
+                    } catch (e: Exception) { swipe.isRefreshing = false; error = "connect failed: $e"; return@launch }
                     if (!isActive) {
                         state.live.getAndSet(null)?.let { withContext(NonCancellable + Dispatchers.IO) { it.close() } }
                         return@launch
@@ -191,15 +210,19 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
                     Log.d(TAG, "proxy port=${live.proxy.port()} modern=$modern")
                     web.loadUrl("${live.origin}/?external_auth=1")
                 }
-            } else if (e == Lifecycle.Event.ON_PAUSE) { pause(); web.onPause() }
         }
+        val observer = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) { web.onResume(); start() }
+            else if (e == Lifecycle.Event.ON_PAUSE) { pause(); web.onPause() }
+        }
+        swipe.setOnRefreshListener { pause(); start() }
         owner.lifecycle.addObserver(observer)
-        onDispose { owner.lifecycle.removeObserver(observer); pause() }
+        onDispose { owner.lifecycle.removeObserver(observer); swipe.setOnRefreshListener(null); pause() }
     }
-    DisposableEffect(web) { onDispose { (web.parent as? ViewGroup)?.removeView(web); web.destroy() } }
+    DisposableEffect(web) { onDispose { (swipe.parent as? ViewGroup)?.removeView(swipe); swipe.removeView(web); web.destroy() } }
 
     Box(modifier) {
-        AndroidView({ web }, Modifier.fillMaxSize())
+        AndroidView({ swipe }, Modifier.fillMaxSize())
         error?.let { Text(it, Modifier.align(androidx.compose.ui.Alignment.Center)) }
     }
 }
