@@ -70,3 +70,13 @@ Desktop test client (generates `cli.key` on first run; refused until paired):
 cargo run -p ha_iroh_core --example cli -- pair '<ha-iroh://pair?t=...>' --device-name cli
 cargo run -p ha_iroh_core --example cli -- curl /api/ --bridge <bridge EndpointId>
 ```
+
+## HA integration (`custom_components/ha_iroh`)
+
+Runs the bridge as a subprocess inside Home Assistant and manages paired phones as devices.
+
+1. Put a `ha-iroh-bridge` binary on the container's PATH (ticket 14 will ship it as a PyPI wheel; until then build it with `rust:alpine` and mount it at `/usr/local/bin/ha-iroh-bridge`).
+2. Copy `custom_components/ha_iroh` into `<config>/custom_components/` (or add this repo in HACS), restart HA.
+3. Settings → Integrations → Add "HA iroh". Then Configure → "Pair device" shows the QR to scan with the app. Deleting the device in HA revokes it.
+
+Tests: `python -m venv .venv-ha && .venv-ha/bin/pip install pytest-homeassistant-custom-component && .venv-ha/bin/pytest tests`.
