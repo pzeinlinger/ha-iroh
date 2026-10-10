@@ -25,6 +25,7 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.19.1@aar")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk9:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.google.crypto.tink:tink-android:1.23.0")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
