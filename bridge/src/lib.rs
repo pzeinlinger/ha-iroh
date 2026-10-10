@@ -8,7 +8,7 @@ use ha_iroh_proto::{
     read_frame, write_frame, PairRequest, PairResponse, PairTicket, RelayConfig, ALPN_PAIR,
     ALPN_TCP,
 };
-use iroh::endpoint::Incoming;
+use iroh::endpoint::{Connection, Incoming};
 use iroh::{Endpoint, EndpointId};
 use serde::{Deserialize, Serialize};
 use tokio::io::{copy_bidirectional, join};
@@ -74,6 +74,8 @@ struct Inner {
     codes: Mutex<HashMap<String, Instant>>,
     // ponytail: in-memory, resets on restart
     fails: Mutex<HashMap<EndpointId, (u32, Instant)>>,
+    /// Open tunnel connections per peer, so `revoke` can cut them.
+    live: Mutex<HashMap<EndpointId, Vec<Connection>>>,
     events: mpsc::Sender<Event>,
 }
 
@@ -95,6 +97,7 @@ impl Bridge {
             allowlist: allowlist.into(),
             codes: Default::default(),
             fails: Default::default(),
+            live: Default::default(),
             events,
         };
         Ok((Bridge(Arc::new(inner)), rx))
@@ -143,6 +146,14 @@ impl Bridge {
         }
         let cfg = &self.0.cfg;
         let id = peer.to_string();
+        // track before the allowlist check: a concurrent revoke then either rejects or kills us
+        self.0
+            .live
+            .lock()
+            .unwrap()
+            .entry(peer)
+            .or_default()
+            .push(conn.clone());
         let device = self
             .0
             .allowlist
@@ -155,6 +166,7 @@ impl Bridge {
         let Some(device) = device else {
             warn!(%peer, "rejected: not in allowlist");
             conn.close(1u32.into(), b"not allowed");
+            self.untrack(&conn);
             return Ok(());
         };
         info!(%peer, device, "connected");
@@ -178,6 +190,7 @@ impl Bridge {
                 }
             });
         }
+        self.untrack(&conn);
         info!(%peer, device, opened = opened.load(Relaxed), closed = closed.load(Relaxed), "disconnected");
         Ok(())
     }
@@ -261,24 +274,62 @@ impl Bridge {
         }
     }
 
+    fn untrack(&self, conn: &Connection) {
+        let mut live = self.0.live.lock().unwrap();
+        if let Some(v) = live.get_mut(&conn.remote_id()) {
+            v.retain(|c| c.stable_id() != conn.stable_id());
+            if v.is_empty() {
+                live.remove(&conn.remote_id());
+            }
+        }
+    }
+
+    pub fn list(&self) -> Vec<Device> {
+        self.0.allowlist.lock().unwrap().devices.clone()
+    }
+
+    /// `false` = no such device. Otherwise removes it, persists, and closes its live connections.
+    pub fn revoke(&self, id: &str) -> anyhow::Result<bool> {
+        let Ok(peer) = id.parse::<EndpointId>() else {
+            return Ok(false);
+        };
+        if !self.list().iter().any(|d| d.endpoint_id == id) {
+            return Ok(false);
+        }
+        self.update(|d| d.retain(|x| x.endpoint_id != id))?;
+        let conns = self
+            .0
+            .live
+            .lock()
+            .unwrap()
+            .remove(&peer)
+            .unwrap_or_default();
+        for c in conns {
+            c.close(4u32.into(), b"revoked");
+        }
+        Ok(true)
+    }
+
     /// Persist first; memory only changes once the file is safely in place.
-    /// Re-pairing the same endpoint replaces its entry.
-    fn add_device(&self, d: Device) -> anyhow::Result<()> {
+    fn update<R>(&self, f: impl FnOnce(&mut Vec<Device>) -> R) -> anyhow::Result<R> {
         let mut list = self.0.allowlist.lock().unwrap();
         let mut next = Allowlist {
-            devices: list
-                .devices
-                .iter()
-                .filter(|x| x.endpoint_id != d.endpoint_id)
-                .cloned()
-                .collect(),
+            devices: list.devices.clone(),
         };
-        next.devices.push(d);
+        let r = f(&mut next.devices);
         let path = &self.0.cfg.allowlist_path;
         let tmp = path.with_extension("tmp");
         std::fs::write(&tmp, toml::to_string(&next)?)?;
         std::fs::rename(&tmp, path)?;
         *list = next;
-        Ok(())
+        Ok(r)
+    }
+
+    /// Re-pairing the same endpoint replaces its entry.
+    fn add_device(&self, d: Device) -> anyhow::Result<()> {
+        self.update(|v| {
+            v.retain(|x| x.endpoint_id != d.endpoint_id);
+            v.push(d);
+        })
     }
 }
