@@ -211,7 +211,7 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
   - Reply via `consumer.accept(ControlAction.RESPONSE_OK)`; the state update arrives through the subscription.
 - Reactive glue: `kotlinx-coroutines-jdk9` `Flow.asPublisher()`, since the service must return `java.util.concurrent.Flow.Publisher`.
 - **Multi-server:**
-  - Control id = `<serverId>:<entity_id>`; `setStructure(server.name)` so the system groups per server; `setZone(area name)` if available (area registry via WS `config/area_registry/list` + entity registry).
+  - Control id = `<serverId>:<entity_id>`; `setStructure(server.name)` so the system groups per server; `setZone(area name)` if available (area registry via WS `config/area_registry/list` + entity registry, device registry area as fallback).
   - On panel open, group the requested ids by server and connect to those servers **in parallel**. One server failing marks only its controls as `STATUS_ERROR`.
 - Tapping a control opens the dashboard for that server (`more-info` deep link if easy, otherwise the server root). A `PendingIntent` is required by the API.
 
@@ -224,11 +224,11 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
 | fan | TYPE_FAN | ToggleRangeTemplate if `percentage` supported | `fan.turn_on/off`, `fan.set_percentage` |
 | cover | TYPE_BLINDS/GARAGE/… by device_class | RangeTemplate (position) or ToggleTemplate | `cover.set_cover_position` / open / close |
 | lock | TYPE_LOCK | ToggleTemplate, auth required (`setAuthRequired`, API 33+; on 31–32 the system requires unlock anyway) | `lock.lock/unlock` |
-| climate | TYPE_AC_HEATER/THERMOSTAT | TemperatureControlTemplate wrapping RangeTemplate (target temp, step from attrs) | `climate.set_temperature`, `set_hvac_mode` |
+| climate | TYPE_THERMOSTAT | TemperatureControlTemplate wrapping RangeTemplate (target temp, step from attrs) | `climate.set_temperature`, `set_hvac_mode` |
 | scene, script, button | TYPE_ROUTINE | StatelessTemplate | `scene.turn_on`, `script.turn_on`, `button.press` |
 | sensor, binary_sensor | TYPE_GENERIC_VIEWSTREAM / NO_TEMPLATE | read-only, state in status text | — |
 
-`unavailable` / `unknown` states map to `Control.STATUS_ERROR` with status text.
+`unavailable` / `unknown` states map to `Control.STATUS_ERROR` with status text, except scene/script/button, where `unknown` means never activated and is not an error.
 
 ### 8.5 Assist
 - **Entry points:**
