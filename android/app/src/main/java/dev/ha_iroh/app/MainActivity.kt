@@ -14,6 +14,8 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -269,21 +271,23 @@ private fun Detail(app: App, id: String, onBack: () -> Unit, onNavigate: (Screen
     }
 }
 
-/** Pick which lights show up in Device Controls; also seeds the state cache. */
+/** Pick which entities (any supported domain) show up in Device Controls; also seeds the state cache. */
 @Composable
 private fun EntityPicker(app: App, id: String, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     val server = app.store.servers.collectAsState().value.firstOrNull { it.id == id } ?: return
-    var lights by remember { mutableStateOf<List<EntityState>?>(null) }
+    var entities by remember { mutableStateOf<Map<String, List<EntityState>>?>(null) }
     var err by remember { mutableStateOf("") }
     LaunchedEffect(id) {
         var client: HaClient? = null
         try {
             client = app.manager.client(server)
-            val all = EntityDiff.parseStates(client.connect().sendCommand(buildJsonObject { put("type", "get_states") }))
-                .filterKeys { it.startsWith("light.") }
+            val session = client.connect()
+            val all = EntityDiff.parseStates(session.sendCommand(buildJsonObject { put("type", "get_states") }))
+                .filterValues { it.toSpec() != null }
             withContext(Dispatchers.IO) { app.entityCache(id).let { it.save(it.load() + all) } }
-            lights = all.values.sortedBy { it.entityId }
+            entities = all.values.sortedBy { it.entityId }.groupBy { domainOf(it.entityId) }
+            withContext(Dispatchers.IO) { session.refreshAreas(app.areaFile(id)) }
         } catch (e: Throwable) {
             err = "error: $e"
         } finally {
@@ -291,25 +295,28 @@ private fun EntityPicker(app: App, id: String, onBack: () -> Unit) {
         }
     }
     val scope = rememberCoroutineScope()
-    Column(Modifier.verticalScroll(rememberScrollState())) {
-        Text("Lights on ${server.name}", style = MaterialTheme.typography.headlineSmall)
-        if (lights == null && err.isEmpty()) Text("loading...")
-        Text(err)
-        lights?.forEach { e ->
-            val on = e.entityId in server.selectedEntities
-            ListItem(
-                headlineContent = { Text((e.attributes["friendly_name"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: e.entityId) },
-                supportingContent = { Text(e.entityId) },
-                trailingContent = {
-                    Checkbox(on, { c ->
-                        scope.launch {
-                            app.store.update(id) {
-                                it.copy(selectedEntities = if (c) (it.selectedEntities + e.entityId).distinct() else it.selectedEntities - e.entityId)
+    LazyColumn {
+        item { Text("Entities on ${server.name}", style = MaterialTheme.typography.headlineSmall) }
+        if (entities == null && err.isEmpty()) item { Text("loading...") }
+        item { Text(err) }
+        entities?.forEach { (domain, list) ->
+            item { Text(domain, style = MaterialTheme.typography.titleMedium) }
+            items(list, key = { it.entityId }) { e ->
+                val on = e.entityId in server.selectedEntities
+                ListItem(
+                    headlineContent = { Text((e.attributes["friendly_name"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: e.entityId) },
+                    supportingContent = { Text(e.entityId) },
+                    trailingContent = {
+                        Checkbox(on, { c ->
+                            scope.launch {
+                                app.store.update(id) {
+                                    it.copy(selectedEntities = if (c) (it.selectedEntities + e.entityId).distinct() else it.selectedEntities - e.entityId)
+                                }
                             }
-                        }
-                    })
-                },
-            )
+                        })
+                    },
+                )
+            }
         }
     }
 }
