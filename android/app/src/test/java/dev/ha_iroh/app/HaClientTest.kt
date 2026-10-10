@@ -109,6 +109,7 @@ class HaClientTest {
         val r = s.sendCommand(buildJsonObject { put("type", "test") })
         assertEquals("pong", r["result"]!!.jsonPrimitive.content)
         assertEquals(listOf("""{"a":{"x":1}}""", """{"c":{"x":2}}"""), events.await().map { it.toString() })
+        while (received.none { it.startsWith("unsub:") }) kotlinx.coroutines.delay(10) // unsubscribe is sent asynchronously after take(2)
         assertEquals("unsub:1", received.last { it.startsWith("unsub:") })
         val e = assertThrows(HaError::class.java) { runBlocking { s.sendCommand(buildJsonObject { put("type", "fail") }) } }
         assertEquals("nope", e.code)
