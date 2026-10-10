@@ -12,3 +12,7 @@
 - [ ] Relay override persists and is used on next Core start
 - [ ] Own EndpointId shown and copyable
 - [ ] Reachable from the frontend's "App settings" entry (externalBus)
+
+## Comments
+
+- Option (from ticket 06 review): once the loopback proxy (11) exists, login could use HA's own `/auth/authorize` page in a WebView instead of the native `login_flow` form. That would support non-`homeassistant` auth providers (trusted networks, OIDC add-ons). Decide here.

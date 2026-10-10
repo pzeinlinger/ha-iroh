@@ -165,7 +165,7 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
 ## 8. Android app (`android/`)
 
 ### 8.0 Server model (multi-server)
-`Server { id (uuid), name, bridgeInfo, refreshToken (encrypted), selectedEntities, pipelineId?, isDefaultAssist }`, stored in DataStore and Tink-encrypted.
+`Server { id (uuid), name, bridgeInfo, refreshToken (encrypted), selectedEntities, pipelineId?, isDefaultAssist }`, stored as one Tink-encrypted JSON blob (AES-GCM, key in Keystore) under `filesDir`.
 - "Add server" runs the pairing + login flow; the list is managed in settings.
 - `ServerManager` lazily creates one `HaClient` per server and tears it down when unused.
 
@@ -185,7 +185,7 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
    - `POST /auth/login_flow` with `{client_id, handler:["homeassistant",null], redirect_uri}`
    - Loop `POST /auth/login_flow/{flow_id}`, rendering the `data_schema` steps (username/password, MFA code)
    - On `create_entry`, take the `result` code and `POST /auth/token` with `grant_type=authorization_code` → access + refresh token
-4. Store the refresh token encrypted (Keystore-backed, e.g. Tink + DataStore).
+4. Store the refresh token encrypted (Keystore-backed Tink AEAD, see §8.0).
 5. Entity picker: list the supported domains and let the user choose which appear in Device Controls. The Android panel also has its own favorites UI.
 
 ### 8.3 HaClient
@@ -306,8 +306,7 @@ Dev env: two HA instances in Docker (`ghcr.io/home-assistant/home-assistant:stab
    - Mitigation: document it and keep `ip_ban_enabled` thresholds sane. The bridge runs inside the HA container, so a dedicated IP is not an option here.
    - A dumb pipe can't add `X-Forwarded-For`. That would need a tiny HTTP-aware mode later; out of scope.
 2. **login_flow `client_id` / `redirect_uri`:** HA validates IndieAuth-style. Verify which pair is accepted for a native app without an http redirect page.
-   - Candidate: reuse the official app's values (`https://home-assistant.io/android` / `homeassistant://auth-callback`).
-   - Alternative: host a small client_id page. Decide in M3.
+   - **Decided (ticket 06): `https://home-assistant.io/android` + `homeassistant://auth-callback`.** HA accepted them for `login_flow`, `/auth/token` and refresh; no client_id page needed. Fallback (`http://ha.iroh/` for both) was never needed.
 3. **Cold-connect latency:** relay first, then holepunch; expect roughly 0.3–1.5 s. Measure in M1/M4.
    - Mitigation: state cache plus audio buffering.
    - If the result is unacceptable, revisit "no warm keeping" (user decision).
