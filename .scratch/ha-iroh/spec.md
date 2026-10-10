@@ -266,7 +266,8 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
     3. On failure, call `callback(false)` and route to re-login.
   - `revokeExternalAuth(payloadJson)`: the frontend logged out. Delete that server's tokens, run `callback(true)`, route to login.
   - `externalBus(msgJson)`: answer `config/get` with minimal capabilities (`hasSettingsScreen: true`, everything else false) so the frontend shows an "App settings" entry. Reply via `window.externalBus(response)`. Ignore other messages for now.
-  - Only expose the interface for pages on the current `<token>.localhost` origin. Check the URL in `onPageStarted`; never load external links in this WebView, send them to a Custom Tab instead.
+  - Only expose the interface for pages on the current `<token>.localhost:<port>` origin. Installed per resume via `WebViewCompat.addWebMessageListener("externalAppNative", {origin})` plus an `addDocumentStartJavaScript` shim that defines `window.externalApp.*` (origin rule is enforced by the framework, main frame only). If the WebView lacks those features, fall back to `addJavascriptInterface("externalApp")` with a top-level origin check (host and port). Never load external links in this WebView: http(s) goes to a Custom Tab, everything else is blocked.
+  - Logout is local-only for now: the refresh token is dropped from the store but not revoked on the HA server.
 - Back button: `webView.canGoBack()` → `goBack()`.
 
 ### 8.7 Settings

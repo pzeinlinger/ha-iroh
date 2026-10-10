@@ -139,10 +139,23 @@ class HaClient(
 ) {
     private var session: Session? = null
 
-    suspend fun refresh(): String = try {
-        http.token(baseUrl, "grant_type" to "refresh_token", "refresh_token" to refreshToken).str("access_token")
+    private suspend fun refreshTokens(): JsonObject = try {
+        http.token(baseUrl, "grant_type" to "refresh_token", "refresh_token" to refreshToken)
     } catch (e: TokenError) {
         if (e.status == 401 || e.error == "invalid_grant") throw ReloginRequired() else throw e
+    }
+
+    suspend fun refresh(): String = refreshTokens().str("access_token")
+
+    private var cached: Pair<String, Long>? = null // access token, expiry (epoch ms)
+
+    /** Cached access token + seconds left (for the WebView's external_auth); refreshes if <30 s left or [force]. */
+    suspend fun accessToken(force: Boolean = false): Pair<String, Int> {
+        val now = System.currentTimeMillis()
+        val (token, exp) = cached?.takeIf { !force && it.second - now > 30_000 } ?: refreshTokens().let {
+            (it.str("access_token") to now + (it["expires_in"]?.jsonPrimitive?.longOrNull ?: 1800) * 1000).also { c -> cached = c }
+        }
+        return token to ((exp - now) / 1000).toInt()
     }
 
     suspend fun get(path: String): String {

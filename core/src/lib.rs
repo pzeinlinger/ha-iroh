@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use tokio::{io::AsyncWriteExt, runtime::Runtime, sync::Mutex};
 
 uniffi::setup_scaffolding!();
+pub mod proxy;
+pub use proxy::LoopbackProxy;
 use tokio_util::sync::CancellationToken;
 
 static RT: LazyLock<Runtime> = LazyLock::new(|| {
@@ -154,7 +156,7 @@ impl Core {
                 .await
                 .map_err(|_| CoreError::Timeout)?
                 .map_err(io)?;
-            Ok(Arc::new(Tunnel { conn }))
+            Ok(Arc::new(Tunnel { conn, cancel: CancellationToken::new() }))
         })
     }
 }
@@ -162,6 +164,8 @@ impl Core {
 #[derive(uniffi::Object)]
 pub struct Tunnel {
     conn: iroh::endpoint::Connection,
+    /// Parent of every proxy's token; cancelled by `disconnect`.
+    cancel: CancellationToken,
 }
 
 #[uniffi::export]
@@ -178,7 +182,12 @@ impl Tunnel {
         }))
     }
 
+    pub fn start_loopback_proxy(&self) -> Result<Arc<LoopbackProxy>, CoreError> {
+        proxy::start(self.conn.clone(), self.cancel.child_token())
+    }
+
     pub fn disconnect(&self) {
+        self.cancel.cancel();
         self.conn.close(0u32.into(), b"bye");
     }
 }
