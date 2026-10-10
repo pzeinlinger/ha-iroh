@@ -16,15 +16,21 @@ Home Assistant access over iroh. See `SPEC.md`.
    (re-enter the shell after installing the NDK).
 
 Nix supplies Rust stable (+ Android targets), cargo-ndk and JDK 17.
-`uniffi-bindgen` is not in nixpkgs; it arrives with the uniffi ticket.
 
 ## Build
 
 ```sh
 cargo build
-cargo ndk -t arm64-v8a -t x86_64 -o android/app/src/main/jniLibs build -p ha_iroh_core
+# Android: native libs -> Kotlin bindings (committed; regenerate when core's API changes) -> APK
+# keep `-p ha_iroh_core`: it keeps iroh's portmapper feature off (a workspace-wide build turns it on)
+cargo ndk -t arm64-v8a -t x86_64 -o android/app/src/main/jniLibs build -p ha_iroh_core --release
+rm android/app/src/main/jniLibs/*/libiroh*.so   # stray iroh cdylibs cargo-ndk copies; not needed
+cargo run -p ha_iroh_core --features bindgen --bin uniffi-bindgen -- generate \
+  --library target/debug/libha_iroh_core.dylib --language kotlin --out-dir android/app/src/main/java
 cd android && ./gradlew assembleDebug
 ```
+
+Debug screen: paste a pairing URI (or `adb shell am start -n dev.ha_iroh.app/.MainActivity --es ticket '<uri>'`), Pair, then GET /api/.
 
 ## Bridge
 

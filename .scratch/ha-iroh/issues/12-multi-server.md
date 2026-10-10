@@ -13,3 +13,5 @@ Covers: parallel connects grouped by `serverId` in `createPublisherFor`, per-ser
 - [ ] Assist chip switches server; conversation restarts
 - [ ] Dashboard switcher swaps proxy + tunnel to the other server
 - [ ] Control tap opens the correct server's dashboard
+
+Also: honor `BridgeInfo.relay` in `Core.connect` (ticket 05 ignores it).
