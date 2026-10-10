@@ -79,6 +79,12 @@ class ServerStore(private val ctx: Context) {
         save(if (l.any { it.id == s.id }) l.map { if (it.id == s.id) s else it } else l + s)
     }
 
+    /** Read-modify-write under the store lock; no-op if the server is gone. */
+    suspend fun update(id: String, f: (Server) -> Server) = locked {
+        val l = _servers.value
+        if (l.any { it.id == id }) save(l.map { if (it.id == id) f(it) else it })
+    }
+
     suspend fun remove(id: String) = locked { save(_servers.value.filter { it.id != id }) }
 
     private companion object { val AD = "servers".toByteArray() }
@@ -88,9 +94,8 @@ class ServerStore(private val ctx: Context) {
 class ServerManager(private val core: () -> Core) {
     private val clients = mutableMapOf<String, HaClient>()
 
-    /** Always a fresh tunnel: simplest way to recover from a dead one. */
+    /** Fresh tunnel per call; the caller owns it and must close it (or [release] by id). */
     suspend fun client(s: Server): HaClient = withContext(Dispatchers.IO) {
-        release(s.id)
         val token = s.refreshToken ?: throw ReloginRequired()
         val tunnel = core().connect(BridgeInfo(s.bridgeInfoName, s.bridgeInfoJson))
         HaClient(tunnel.okHttpClient(), BASE_URL, token, tunnel::disconnect)

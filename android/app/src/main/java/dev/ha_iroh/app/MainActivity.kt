@@ -28,10 +28,14 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import uniffi.ha_iroh_core.BridgeInfo
 import uniffi.ha_iroh_core.Tunnel
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -41,6 +45,7 @@ private sealed interface Screen {
     data class Add(val uri: String = "") : Screen
     data class Login(val server: Server, val tunnel: Tunnel, val flow: LoginFlow, val step: Step) : Screen
     data class Detail(val id: String) : Screen
+    data class Entities(val id: String) : Screen
 }
 
 class MainActivity : ComponentActivity() {
@@ -59,6 +64,7 @@ class MainActivity : ComponentActivity() {
                         is Screen.Add -> AddServer(app, s.uri, { screen = Screen.List }) { screen = it }
                         is Screen.Login -> Login(app, s, { screen = Screen.List }) { screen = it }
                         is Screen.Detail -> Detail(app, s.id, { screen = Screen.List }) { screen = it }
+                        is Screen.Entities -> EntityPicker(app, s.id) { screen = Screen.Detail(s.id) }
                     }
                 }
             }
@@ -197,7 +203,7 @@ private fun Login(app: App, s: Screen.Login, onCancel: () -> Unit, onNext: (Scre
 }
 
 @Composable
-private fun Detail(app: App, id: String, onBack: () -> Unit, onLogin: (Screen) -> Unit) {
+private fun Detail(app: App, id: String, onBack: () -> Unit, onNavigate: (Screen) -> Unit) {
     BackHandler(onBack = onBack)
     val scope = rememberCoroutineScope()
     val server = app.store.servers.collectAsState().value.firstOrNull { it.id == id } ?: return
@@ -226,20 +232,67 @@ private fun Detail(app: App, id: String, onBack: () -> Unit, onLogin: (Screen) -
             Button(enabled = !busy, onClick = {
                 scope.launch {
                     busy = true
-                    runCatching { beginLogin(app, server) }.onSuccess(onLogin).onFailure { out = "error: $it"; busy = false }
+                    runCatching { beginLogin(app, server) }.onSuccess(onNavigate).onFailure { out = "error: $it"; busy = false }
                 }
             }) { Text("Log in") }
         } else {
             Button(enabled = !busy, onClick = { run { it.connect().close(); "auth_ok" } }) { Text("Connect (WS auth)") }
             Button(enabled = !busy, onClick = { run { it.get("/api/") } }) { Text("GET /api/") }
+            Button(enabled = !busy, onClick = { onNavigate(Screen.Entities(id)) }) { Text("Entities") }
         }
         Button(enabled = !busy, onClick = {
             scope.launch {
                 withContext(Dispatchers.IO) { app.manager.release(id) }
                 app.store.remove(id)
+                withContext(Dispatchers.IO) { File(app.filesDir, "entities-$id.json").delete() }
                 onBack()
             }
         }) { Text("Remove server") }
         Text(out)
+    }
+}
+
+/** Pick which lights show up in Device Controls; also seeds the state cache. */
+@Composable
+private fun EntityPicker(app: App, id: String, onBack: () -> Unit) {
+    BackHandler(onBack = onBack)
+    val server = app.store.servers.collectAsState().value.firstOrNull { it.id == id } ?: return
+    var lights by remember { mutableStateOf<List<EntityState>?>(null) }
+    var err by remember { mutableStateOf("") }
+    LaunchedEffect(id) {
+        var client: HaClient? = null
+        try {
+            client = app.manager.client(server)
+            val all = EntityDiff.parseStates(client.connect().sendCommand(buildJsonObject { put("type", "get_states") }))
+                .filterKeys { it.startsWith("light.") }
+            withContext(Dispatchers.IO) { app.entityCache(id).let { it.save(it.load() + all) } }
+            lights = all.values.sortedBy { it.entityId }
+        } catch (e: Throwable) {
+            err = "error: $e"
+        } finally {
+            withContext(NonCancellable + Dispatchers.IO) { client?.close() }
+        }
+    }
+    val scope = rememberCoroutineScope()
+    Column(Modifier.verticalScroll(rememberScrollState())) {
+        Text("Lights on ${server.name}", style = MaterialTheme.typography.headlineSmall)
+        if (lights == null && err.isEmpty()) Text("loading...")
+        Text(err)
+        lights?.forEach { e ->
+            val on = e.entityId in server.selectedEntities
+            ListItem(
+                headlineContent = { Text((e.attributes["friendly_name"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: e.entityId) },
+                supportingContent = { Text(e.entityId) },
+                trailingContent = {
+                    Checkbox(on, { c ->
+                        scope.launch {
+                            app.store.update(id) {
+                                it.copy(selectedEntities = if (c) (it.selectedEntities + e.entityId).distinct() else it.selectedEntities - e.entityId)
+                            }
+                        }
+                    })
+                },
+            )
+        }
     }
 }
