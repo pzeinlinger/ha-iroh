@@ -36,23 +36,29 @@ secret_key_path = "ha-iroh-bridge.key"   # generated 0600 on first run
 allowlist_path = "allowlist.toml"
 relay = "n0"                             # or ["https://relay.example/"]
 name = "Home Assistant"
+pair_ttl = 600                           # pairing code lifetime, seconds
 ```
 
 ```sh
 cargo run -p ha_iroh_bridge -- run --config ha-iroh-bridge.toml   # prints EndpointId
 ```
 
-Until pairing exists, add devices by hand to the allowlist (re-read on every connection):
-
-```toml
-[[devices]]
-endpoint_id = "<client EndpointId>"
-device_name = "desktop-cli"
-added_at = "2026-01-01"
-```
-
-Desktop test client (generates `cli.key` and prints its EndpointId on first run; not allowlisted yet, so the first call is refused):
+Admin channel is JSON lines on stdin/stdout (logs go to stderr). Stdin EOF shuts the bridge down.
+Start a pairing by writing one line:
 
 ```sh
+(echo '{"cmd":"pair"}'; sleep 600) | cargo run -p ha_iroh_bridge -- run
+# {"event":"ready","endpoint_id":"..."}
+# {"ok":true,"ticket":"ha-iroh://pair?t=...","code":"..."}
+# {"event":"paired","endpoint_id":"...","device_name":"..."}   (after a client pairs)
+```
+
+The ticket URI is what the HA integration will render as a QR code. Codes are single use and expire after `pair_ttl`.
+Paired devices are appended to the allowlist and take effect immediately.
+
+Desktop test client (generates `cli.key` on first run; refused until paired):
+
+```sh
+cargo run -p ha_iroh_core --example cli -- pair '<ha-iroh://pair?t=...>' --device-name cli
 cargo run -p ha_iroh_core --example cli -- curl /api/ --bridge <bridge EndpointId>
 ```
