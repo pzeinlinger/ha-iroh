@@ -1,0 +1,10 @@
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="assist_text" android:icon="@drawable/ic_assist" android:shortcutShortLabel="@string/assist_text">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="dev.ha_iroh.app" android:targetClass="dev.ha_iroh.app.AssistActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="assist_voice" android:icon="@drawable/ic_assist" android:shortcutShortLabel="@string/assist_voice">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="dev.ha_iroh.app" android:targetClass="dev.ha_iroh.app.AssistActivity">
+            <extra android:name="voice" android:value="true" />
+        </intent>
+    </shortcut>
+</shortcuts>

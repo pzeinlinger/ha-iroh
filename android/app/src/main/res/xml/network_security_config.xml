@@ -3,5 +3,7 @@
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">ha.iroh</domain>
+        <!-- dashboard WebView -> loopback proxy at <token>.localhost -->
+        <domain includeSubdomains="true">localhost</domain>
     </domain-config>
 </network-security-config>

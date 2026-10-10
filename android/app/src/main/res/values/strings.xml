@@ -1,0 +1,5 @@
+<resources>
+    <string name="assist_text">Assist (text)</string>
+    <string name="assist_voice">Assist (voice)</string>
+    <string name="assist_tile">Assist</string>
+</resources>
