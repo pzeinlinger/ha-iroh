@@ -116,6 +116,8 @@ URI: `ha-iroh://pair?t=<base64url(JSON)>`
   - `{"cmd":"list"}` → `{"ok":true,"devices":[{endpoint_id, device_name, added_at}]}`
   - `{"cmd":"revoke","endpoint_id":"..."}` → `{"ok":true}`; also kills live connections from that id
   - Unsolicited event lines: `{"event":"paired","endpoint_id":...,"device_name":...}` so the integration can create the device without polling.
+  - Responses carry no request id: commands are processed one at a time in order; a stdout line with an `event` key is an event, anything else is the response to the oldest unanswered command.
+  - `ready` is printed only after the key and allowlist loaded successfully; stdin EOF or SIGTERM stops the daemon.
 - **Allowlist:** TOML, hot reload or in-memory with atomic write.
 - **Size target:** small. Accept loop, `tokio::io::copy_bidirectional`-style forwarding per stream.
 - **Packaging:** static musl binary, published as a PyPI platform wheel `ha-iroh-bridge` (maturin `bindings = "bin"`), tags `musllinux_1_2` + `manylinux` for `x86_64` and `aarch64`. The HA integration lists it in `manifest.json` `requirements`, so HA installs the right binary with pip. No download code in the integration.

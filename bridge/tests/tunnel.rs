@@ -1,20 +1,13 @@
-use ha_iroh_bridge::{serve, Config};
+mod common;
+use common::{local_endpoint, tempdir};
+use ha_iroh_bridge::{Bridge, Config};
 use ha_iroh_proto::ALPN_TCP;
-use iroh::{endpoint::presets, Endpoint, EndpointAddr, RelayMode, SecretKey};
+use iroh::{Endpoint, EndpointAddr};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 const REQ: &[u8] = b"GET /api/ HTTP/1.1\r\nHost: ha.iroh\r\nConnection: close\r\n\r\n";
 const RESP: &[u8] = b"HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: 26\r\n\r\n{\"message\":\"Unauthorized\"}";
-
-async fn local_endpoint(alpns: Vec<Vec<u8>>) -> Endpoint {
-    Endpoint::builder(presets::Minimal)
-        .relay_mode(RelayMode::Disabled)
-        .alpns(alpns)
-        .bind()
-        .await
-        .unwrap()
-}
 
 /// Fake HA + bridge (allowlist holds `allowed`), returns bridge addr.
 async fn setup(allowed: Option<&Endpoint>, dir: &std::path::Path) -> EndpointAddr {
@@ -44,11 +37,19 @@ async fn setup(allowed: Option<&Endpoint>, dir: &std::path::Path) -> EndpointAdd
         )
         .unwrap();
     }
-    let cfg = Config { ha_addr, allowlist_path, ..Config::default() };
+    let cfg = Config {
+        ha_addr,
+        allowlist_path,
+        ..Config::default()
+    };
     let bridge = local_endpoint(vec![ALPN_TCP.to_vec()]).await;
     let port = bridge.bound_sockets()[0].port();
     let addr = EndpointAddr::new(bridge.id()).with_ip_addr(([127, 0, 0, 1], port).into());
-    tokio::spawn(serve(cfg, bridge));
+    let (b, _rx) = Bridge::new(cfg, bridge).unwrap();
+    tokio::spawn(async move {
+        let _rx = _rx; // keep the event channel open
+        b.serve().await
+    });
     addr
 }
 
@@ -83,10 +84,4 @@ async fn unlisted_client_is_closed() {
     assert!(res.is_err(), "expected close, got {res:?}");
     let reason = conn.closed().await;
     assert!(format!("{reason:?}").contains("not allowed"), "{reason:?}");
-}
-
-fn tempdir(name: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("ha-iroh-test-{name}-{}", SecretKey::generate().public()));
-    std::fs::create_dir_all(&d).unwrap();
-    d
 }

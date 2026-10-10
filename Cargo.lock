@@ -943,9 +943,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "data-encoding",
  "ha_iroh_proto",
  "iroh",
  "serde",
+ "serde_json",
+ "time",
  "tokio",
  "toml",
  "tracing",
@@ -960,6 +963,7 @@ dependencies = [
  "clap",
  "ha_iroh_proto",
  "iroh",
+ "serde_json",
  "tokio",
 ]
 
@@ -967,8 +971,12 @@ dependencies = [
 name = "ha_iroh_proto"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "data-encoding",
  "iroh",
  "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -2640,6 +2648,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_json"
+version = "1.0.152"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1741ab7a6cc54a03a89b5d563ed60075c277d9e3cfa73ad0c1f23f23974703c6"
+dependencies = [
+ "itoa",
+ "memchr",
+ "serde",
+ "serde_core",
+ "zmij",
+]
+
+[[package]]
 name = "serde_spanned"
 version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3962,3 +3983,9 @@ dependencies = [
  "quote",
  "syn 3.0.7",
 ]
+
+[[package]]
+name = "zmij"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
