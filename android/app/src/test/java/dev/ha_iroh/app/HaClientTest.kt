@@ -49,6 +49,18 @@ class HaClientTest {
 
     @After fun stop() = server.close()
 
+    @Test fun accessTokenIsCachedUntilForced() = runBlocking {
+        start(tokens)
+        val c = client()
+        val (tok, exp) = c.accessToken()
+        assertEquals("acc1", tok)
+        assertTrue(exp in 1700..1800)
+        c.accessToken()
+        assertEquals(1, received.size) // cached
+        c.accessToken(force = true)
+        assertEquals(2, received.size)
+    }
+
     @Test fun refreshThenWsAuthHandshake() = runBlocking {
         start(tokens)
         val c = client()

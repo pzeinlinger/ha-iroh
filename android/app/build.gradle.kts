@@ -29,6 +29,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.google.crypto.tink:tink-android:1.23.0")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("androidx.browser:browser:1.10.0")
+    implementation("androidx.webkit:webkit:1.17.1")
     val camerax = "1.6.2"
     implementation("androidx.camera:camera-core:$camerax")
     implementation("androidx.camera:camera-camera2:$camerax")

@@ -46,6 +46,7 @@ private sealed interface Screen {
     data class Login(val server: Server, val tunnel: Tunnel, val flow: LoginFlow, val step: Step) : Screen
     data class Detail(val id: String) : Screen
     data class Entities(val id: String) : Screen
+    data class Dashboard(val id: String) : Screen
 }
 
 class MainActivity : ComponentActivity() {
@@ -55,12 +56,27 @@ class MainActivity : ComponentActivity() {
         // debug-only: adb ... --es ticket <uri> opens Add with the URI prefilled
         val ticket = intent.getStringExtra("ticket")
         setContent {
-            LaunchedEffect(Unit) { app.store.init() }
             MaterialTheme {
-                var screen by remember { mutableStateOf<Screen>(if (ticket != null) Screen.Add(ticket) else Screen.List) }
+                val servers by app.store.servers.collectAsState()
+                var loaded by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) { app.store.init(); loaded = true }
+                // Start on the first logged-in server's dashboard; Back from the server list returns there.
+                var active by remember { mutableStateOf<String?>(null) } // last shown dashboard
+                val loggedIn = servers.filter { it.refreshToken != null }
+                val home: Screen = (loggedIn.firstOrNull { it.id == active } ?: loggedIn.firstOrNull())?.let { Screen.Dashboard(it.id) } ?: Screen.List
+                var screen by remember { mutableStateOf<Screen?>(if (ticket != null) Screen.Add(ticket) else null) }
+                val cur = screen ?: if (loaded) home else return@MaterialTheme
+                if (cur is Screen.Dashboard) {
+                    LaunchedEffect(cur.id) { active = cur.id }
+                    Column(Modifier.fillMaxSize().padding(top = 80.dp).navigationBarsPadding()) {
+                        DashboardBar(servers, cur.id, { screen = if (it.refreshToken != null) Screen.Dashboard(it.id) else Screen.Detail(it.id) }, { screen = Screen.List })
+                        key(cur.id) { Dashboard(app, cur.id, { screen = Screen.List }, { screen = Screen.Detail(cur.id) }, Modifier.weight(1f)) }
+                    }
+                    return@MaterialTheme
+                }
                 Column(Modifier.fillMaxSize().padding(16.dp).padding(top = 48.dp)) {
-                    when (val s = screen) {
-                        Screen.List -> ServerList(app, { screen = Screen.Add() }, { screen = Screen.Detail(it) })
+                    when (val s = cur) {
+                        Screen.List -> ServerList(app, home, { screen = Screen.Add() }, { screen = Screen.Detail(it) }, { screen = it })
                         is Screen.Add -> AddServer(app, s.uri, { screen = Screen.List }) { screen = it }
                         is Screen.Login -> Login(app, s, { screen = Screen.List }) { screen = it }
                         is Screen.Detail -> Detail(app, s.id, { screen = Screen.List }) { screen = it }
@@ -82,7 +98,8 @@ private suspend fun beginLogin(app: App, server: Server): Screen.Login = withCon
 }
 
 @Composable
-private fun ServerList(app: App, onAdd: () -> Unit, onOpen: (String) -> Unit) {
+private fun ServerList(app: App, home: Screen, onAdd: () -> Unit, onOpen: (String) -> Unit, onNavigate: (Screen) -> Unit) {
+    BackHandler(home != Screen.List) { onNavigate(home) }
     val servers by app.store.servers.collectAsState()
     Box(Modifier.fillMaxSize()) {
         Column {

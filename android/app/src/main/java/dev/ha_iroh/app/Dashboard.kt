@@ -1,0 +1,220 @@
+package dev.ha_iroh.app
+
+import android.annotation.SuppressLint
+import android.util.Log
+import android.view.ViewGroup
+import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
+import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.webkit.ScriptHandler
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.*
+import uniffi.ha_iroh_core.BridgeInfo
+import uniffi.ha_iroh_core.LoopbackProxy
+import java.util.concurrent.atomic.AtomicReference
+
+private const val TAG = "Dashboard"
+private const val NATIVE = "externalAppNative" // WebMessageListener object; window.externalApp is a JS shim over it
+private val CALLBACK = Regex("[A-Za-z_]\\w*")
+
+// Same contract as the official app's `externalApp`, forwarded to the origin-scoped message listener.
+private val SHIM = """
+window.externalApp = {
+  getExternalAuth: p => $NATIVE.postMessage(JSON.stringify({method: "getExternalAuth", payload: p})),
+  revokeExternalAuth: p => $NATIVE.postMessage(JSON.stringify({method: "revokeExternalAuth", payload: p})),
+  externalBus: p => $NATIVE.postMessage(JSON.stringify({method: "externalBus", payload: p})),
+};
+"""
+
+private fun String?.inOrigin(origin: String?) = this != null && origin != null && (this == origin || startsWith("$origin/"))
+
+/** One resume..pause worth of tunnel + proxy. */
+private class Live(val proxy: LoopbackProxy, val client: HaClient) {
+    val origin = "http://${proxy.token()}.localhost:${proxy.port()}"
+    /** Blocking (uniffi): call off the main thread. */
+    fun close() { proxy.stop(); client.close() } // client.close() disconnects the tunnel
+}
+
+/** Main screen: the HA frontend of [serverId] through the loopback proxy (SPEC §8.6). */
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () -> Unit, modifier: Modifier = Modifier) {
+    val ctx = LocalContext.current
+    val owner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
+    var canBack by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val state = remember { object { val live = AtomicReference<Live?>(null); var job: Job? = null; var script: ScriptHandler? = null } }
+
+    val web = remember {
+        WebView(ctx).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+        }
+    }
+    val modern = remember {
+        WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) && WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
+    }
+
+    fun reply(js: String) = web.evaluateJavascript(js, null)
+
+    /** One external-app call; [method] is the `externalApp` method name, [payload] its JSON string argument. */
+    suspend fun handle(method: String, payload: String) {
+        var cb: String? = null
+        try {
+            val o = json.parseToJsonElement(payload).jsonObject
+            cb = o["callback"]?.jsonPrimitive?.content?.takeIf { CALLBACK.matches(it) }
+            when (method) {
+                "getExternalAuth" -> {
+                    val client = state.live.get()?.client ?: return
+                    try {
+                        val (token, expiresIn) = client.accessToken(o["force"]?.jsonPrimitive?.booleanOrNull == true)
+                        reply("window.$cb(true, ${buildJsonObject { put("access_token", token); put("expires_in", expiresIn) }})")
+                    } catch (e: ReloginRequired) {
+                        reply("window.$cb(false)")
+                        app.store.update(serverId) { it.copy(refreshToken = null) }
+                        onRelogin()
+                    }
+                }
+                "revokeExternalAuth" -> {
+                    reply("window.$cb(true)")
+                    app.store.update(serverId) { it.copy(refreshToken = null) }
+                    onRelogin()
+                }
+                "externalBus" -> when (o["type"]?.jsonPrimitive?.content) {
+                    "config/get" -> reply("window.externalBus(${buildJsonObject {
+                        put("id", o["id"] ?: JsonNull)
+                        put("type", "result")
+                        put("success", true)
+                        putJsonObject("result") { put("hasSettingsScreen", true); put("canWriteTag", false) }
+                    }})")
+                    "config_screen/show" -> onSettings()
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "$method failed", e)
+            cb?.let { reply("window.$it(false)") }
+        }
+    }
+
+    remember(web) { // install once
+        web.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                val u = request.url
+                if (u.toString().inOrigin(state.live.get()?.origin)) return false
+                if (u.scheme == "http" || u.scheme == "https") runCatching { CustomTabsIntent.Builder().build().launchUrl(ctx, u) }
+                return true // never navigate this WebView away from the proxy origin
+            }
+            override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) { canBack = view.canGoBack() }
+        }
+        if (!modern) {
+            // Fallback: exposed to every frame, so only act while the top-level page is on our origin.
+            fun guarded(method: String, payload: String) { scope.launch { if (web.url.inOrigin(state.live.get()?.origin)) handle(method, payload) } }
+            web.addJavascriptInterface(object {
+                @JavascriptInterface fun getExternalAuth(p: String) = guarded("getExternalAuth", p)
+                @JavascriptInterface fun revokeExternalAuth(p: String) = guarded("revokeExternalAuth", p)
+                @JavascriptInterface fun externalBus(p: String) = guarded("externalBus", p)
+            }, "externalApp")
+        }
+    }
+
+    BackHandler(canBack) { web.goBack() }
+
+    DisposableEffect(owner, serverId) {
+        fun pause() {
+            state.job?.cancel()
+            state.job = null
+            if (modern && state.script != null) {
+                state.script?.remove()
+                state.script = null
+                WebViewCompat.removeWebMessageListener(web, NATIVE)
+            }
+            state.live.getAndSet(null)?.let { l -> Thread { runCatching { l.close() } }.start() }
+        }
+        val observer = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME) {
+                web.onResume()
+                error = null
+                state.job = scope.launch {
+                    // Blocking uniffi calls can't be cancelled: they run to completion, then we close if paused meanwhile.
+                    try {
+                        withContext(NonCancellable + Dispatchers.IO) {
+                            val s = app.store.servers.value.first { it.id == serverId }
+                            val token = s.refreshToken ?: throw ReloginRequired()
+                            val tunnel = app.core().connect(BridgeInfo(s.bridgeInfoName, s.bridgeInfoJson))
+                            try {
+                                state.live.set(Live(tunnel.startLoopbackProxy(), HaClient(tunnel.okHttpClient(), BASE_URL, token, tunnel::disconnect)))
+                            } catch (t: Throwable) { tunnel.disconnect(); throw t }
+                        }
+                    } catch (e: CancellationException) { throw e
+                    } catch (e: ReloginRequired) { onRelogin(); return@launch
+                    } catch (e: Exception) { error = "connect failed: $e"; return@launch }
+                    if (!isActive) {
+                        state.live.getAndSet(null)?.let { withContext(NonCancellable + Dispatchers.IO) { it.close() } }
+                        return@launch
+                    }
+                    val live = state.live.get() ?: return@launch
+                    if (modern) {
+                        val rules = setOf(live.origin)
+                        WebViewCompat.addWebMessageListener(web, NATIVE, rules) { _, msg, _, isMainFrame, _ ->
+                            if (isMainFrame) runCatching { json.parseToJsonElement(msg.data ?: "").jsonObject }.getOrNull()?.let { m ->
+                                val method = m["method"]?.jsonPrimitive?.content
+                                val payload = m["payload"]?.jsonPrimitive?.content
+                                if (method != null && payload != null) scope.launch { handle(method, payload) }
+                            }
+                        }
+                        state.script = WebViewCompat.addDocumentStartJavaScript(web, SHIM, rules)
+                    }
+                    Log.d(TAG, "proxy port=${live.proxy.port()} modern=$modern")
+                    web.loadUrl("${live.origin}/?external_auth=1")
+                }
+            } else if (e == Lifecycle.Event.ON_PAUSE) { pause(); web.onPause() }
+        }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer); pause() }
+    }
+    DisposableEffect(web) { onDispose { (web.parent as? ViewGroup)?.removeView(web); web.destroy() } }
+
+    Box(modifier) {
+        AndroidView({ web }, Modifier.fillMaxSize())
+        error?.let { Text(it, Modifier.align(androidx.compose.ui.Alignment.Center)) }
+    }
+}
+
+/** Top bar: server switcher + gear to the server list. */
+@Composable
+fun DashboardBar(servers: List<Server>, activeId: String, onPick: (Server) -> Unit, onSettings: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) {
+            TextButton({ open = true }) { Text((servers.firstOrNull { it.id == activeId }?.name ?: "?") + " ▾") }
+            DropdownMenu(open, { open = false }) {
+                servers.forEach { s -> DropdownMenuItem({ Text(s.name) }, { open = false; onPick(s) }) }
+            }
+        }
+        TextButton(onSettings) { Text("⚙") }
+    }
+}

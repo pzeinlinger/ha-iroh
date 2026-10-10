@@ -1082,9 +1082,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "data-encoding",
  "ha_iroh_bridge",
  "ha_iroh_proto",
  "iroh",
+ "rand",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

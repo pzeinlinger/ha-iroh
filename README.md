@@ -80,3 +80,9 @@ Runs the bridge as a subprocess inside Home Assistant and manages paired phones 
 3. Settings → Integrations → Add "HA iroh". Then Configure → "Pair device" shows the QR to scan with the app. Deleting the device in HA revokes it.
 
 Tests: `python -m venv .venv-ha && .venv-ha/bin/pip install pytest-homeassistant-custom-component && .venv-ha/bin/pytest tests`.
+
+## Android app
+
+Build: `cargo ndk ... -p ha_iroh_core --release` → regenerate bindings → `./gradlew assembleDebug` (see Build above).
+Screens: dashboard (HA frontend via loopback proxy) with server switcher, server list/add/login, entity picker, Device Controls panel (lights), Assist text sheet via QS tile / launcher shortcuts.
+Unit tests: `cd android && ./gradlew testDebugUnitTest`.

@@ -10,7 +10,17 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
+        <activity android:name=".AssistActivity" android:exported="false" android:theme="@style/Theme.Assist"
+            android:excludeFromRecents="true" android:taskAffinity="" android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+        <service android:name=".AssistTile" android:exported="true" android:label="@string/assist_tile" android:icon="@drawable/ic_assist"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
         <service android:name=".ControlsService" android:exported="true" android:label="ha-iroh"
             android:permission="android.permission.BIND_CONTROLS">
             <intent-filter>
