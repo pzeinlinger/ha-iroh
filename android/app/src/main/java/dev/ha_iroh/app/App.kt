@@ -5,6 +5,9 @@ import uniffi.ha_iroh_core.Core
 import uniffi.ha_iroh_core.RelayConfig
 
 class App : Application() {
+    val store by lazy { ServerStore(this) }
+    val manager by lazy { ServerManager(::core) }
+
     /** Created lazily (binds an endpoint, so call from IO). Reset after `wipeKey`. */
     @Volatile private var _core: Core? = null
 
