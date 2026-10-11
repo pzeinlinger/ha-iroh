@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
@@ -75,13 +76,15 @@ fun EntityState.toControl(serverId: String, serverName: String, pi: PendingInten
 private fun EntityState.toStateless(serverId: String, serverName: String, pi: PendingIntent, area: String?) =
     Control.StatelessBuilder(toControl(serverId, serverName, pi, area = area)).build()
 
+private val RETRY_DELAYS_MS = listOf(2_000L, 5_000L, 10_000L)
+
 class ControlsService : ControlsProviderService() {
     private val app get() = application as App
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val live = ConcurrentHashMap<String, Session>()
-    private val pi by lazy {
-        PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE) // placeholder: opens the app
-    }
+    /** Tap on a tile opens that server's dashboard (more-info deep link skipped: dashboard root only). */
+    private fun pi(serverId: String) = PendingIntent.getActivity(this, serverId.hashCode(),
+        Intent(this, MainActivity::class.java).putExtra(EXTRA_SERVER_ID, serverId), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     override fun onDestroy() {
         scope.cancel() // flows' finally blocks close sessions + tunnels
@@ -92,6 +95,7 @@ class ControlsService : ControlsProviderService() {
         app.store.init()
         for (s in app.store.servers.value) {
             val cache = entityCache(s.id).load()
+            val pi = pi(s.id)
             val areas = loadAreas(areaFile(s.id))
             s.selectedEntities.forEach { emit((cache[it] ?: EntityState(it, "unknown")).toStateless(s.id, s.name, pi, areas[it])) }
         }
@@ -103,7 +107,7 @@ class ControlsService : ControlsProviderService() {
         val byServer = controlIds.groupBy { ControlId.parse(it).serverId }
         // favourites of a removed server would otherwise sit on "Loading..." forever
         byServer.filterKeys { sid -> servers.none { it.id == sid } }.values.flatten().forEach {
-            emit(Control.StatefulBuilder(it, pi).setTitle(ControlId.parse(it).entityId).setStatus(Control.STATUS_NOT_FOUND).build())
+            emit(Control.StatefulBuilder(it, pi(ControlId.parse(it).serverId)).setTitle(ControlId.parse(it).entityId).setStatus(Control.STATUS_NOT_FOUND).build())
         }
         emitAll(byServer.mapNotNull { (sid, ids) ->
             servers.firstOrNull { it.id == sid }?.let { serverControls(it, ids.map { id -> ControlId.parse(id).entityId }) }
@@ -112,6 +116,7 @@ class ControlsService : ControlsProviderService() {
 
     /** Cached (stale) first, then live. Failure only affects this server's controls. */
     private fun serverControls(server: Server, entityIds: List<String>): Flow<Control> = flow {
+        val pi = pi(server.id)
         val cache = entityCache(server.id)
         var states = cache.load()
         var areas = loadAreas(areaFile(server.id))
@@ -119,39 +124,52 @@ class ControlsService : ControlsProviderService() {
             (states[id] ?: if (error != null) EntityState(id, "unknown") else null)?.toControl(server.id, server.name, pi, stale, error, areas[id])
         }
         controls(stale = true).forEach { emit(it) }
-        var client: HaClient? = null
-        var session: Session? = null
-        try {
-            client = app.manager.client(server)
-            session = client.connect()
-            live[server.id] = session
-            val cmd = buildJsonObject { put("type", "subscribe_entities"); putJsonArray("entity_ids") { entityIds.forEach { add(it) } } }
-            var areasDone = false
-            session.subscribe(cmd).collect { ev ->
-                val before = states
-                states = EntityDiff.apply(states, ev)
-                cache.save(states)
-                controls().forEach { emit(it) }
-                // after the first live state: zones show up from the next emission on, no delay for the state
-                if (!areasDone) { areasDone = true; areas = session.refreshAreas(areaFile(server.id)) }
-                // removed in HA: tell the panel once instead of leaving it stale
-                entityIds.filter { it in before && it !in states }.forEach {
-                    emit(EntityState(it, "unknown").toControl(server.id, server.name, pi, error = "removed", area = areas[it]))
+        var attempt = 0
+        while (true) { // ponytail: fixed 3 retries (2s, 5s, 10s), then offline until the panel is reopened
+            var client: HaClient? = null
+            var session: Session? = null
+            try {
+                client = app.manager.client(server)
+                session = client.connect()
+                live[server.id] = session
+                val cmd = buildJsonObject { put("type", "subscribe_entities"); putJsonArray("entity_ids") { entityIds.forEach { add(it) } } }
+                var areasDone = false
+                session.subscribe(cmd).collect { ev ->
+                    attempt = 0 // live again: a later drop gets a fresh set of retries
+                    // ponytail: counter resets per live event → flapping server retries forever at 2 s
+                    val before = states
+                    states = EntityDiff.apply(states, ev)
+                    cache.save(states)
+                    controls().forEach { emit(it) }
+                    // after the first live state: zones show up from the next emission on, no delay for the state
+                    if (!areasDone) { areasDone = true; areas = session.refreshAreas(areaFile(server.id)) }
+                    // removed in HA: tell the panel once instead of leaving it stale
+                    entityIds.filter { it in before && it !in states }.forEach {
+                        emit(EntityState(it, "unknown").toControl(server.id, server.name, pi, error = "removed", area = areas[it]))
+                    }
                 }
+                throw IOException("subscription ended") // a dropped tunnel can end the flow without an exception
+            } catch (e: Throwable) {
+                if (e is CancellationException && e !is TimeoutCancellationException) throw e
+                Log.w("ControlsService", "server ${server.id} failed (attempt $attempt)", e)
+                val retry = e is IOException || e is TimeoutCancellationException || e is uniffi.ha_iroh_core.CoreException
+                if (retry && attempt < RETRY_DELAYS_MS.size) {
+                    controls(error = "reconnecting…").forEach { emit(it) }
+                } else {
+                    val msg = when (e) {
+                        is ReloginRequired -> "re-login required"
+                        is HaError -> e.message
+                        is IOException, is TimeoutCancellationException, is uniffi.ha_iroh_core.CoreException -> "offline"
+                        else -> "error"
+                    }
+                    controls(error = msg).forEach { emit(it) }
+                    return@flow
+                }
+            } finally {
+                session?.let { live.remove(server.id, it) }
+                client?.close() // closes session + tunnel
             }
-        } catch (e: Throwable) {
-            if (e is CancellationException && e !is TimeoutCancellationException) throw e
-            Log.w("ControlsService", "server ${server.id} failed", e)
-            val msg = when (e) {
-                is ReloginRequired -> "re-login required"
-                is HaError -> e.message
-                is IOException, is TimeoutCancellationException, is uniffi.ha_iroh_core.CoreException -> "offline"
-                else -> "error"
-            }
-            controls(error = msg).forEach { emit(it) }
-        } finally {
-            session?.let { live.remove(server.id, it) }
-            client?.close() // closes session + tunnel
+            delay(RETRY_DELAYS_MS[attempt++])
         }
     }
 

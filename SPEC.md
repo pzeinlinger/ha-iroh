@@ -148,7 +148,7 @@ class Stream { fun read(max: UInt, timeoutMs: UInt /* 0 = none */): ByteArray /*
 class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
 ```
 
-- **Multiple servers:** one `Core` / Endpoint for the whole app. `connect()` is called per server, and several Tunnels can be live at once. The relay in `BridgeInfo` is informational for now; per-server relay is handled in ticket 12.
+- **Multiple servers:** one `Core` / Endpoint for the whole app. `connect()` is called per server, and several Tunnels can be live at once. Relay comes from the ticket's `EndpointAddr`; `BridgeInfo.relay` is informational.
 - **LoopbackProxy** (for the dashboard WebView only):
   - Binds `127.0.0.1:0`; the token is random 128-bit, lowercase base32 (valid DNS label).
   - Per accepted TCP conn: peek the HTTP request head (up to 8 KiB) and require `Host: <token>.localhost:<port>`. On mismatch, reply 403 and close.

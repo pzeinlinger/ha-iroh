@@ -15,7 +15,7 @@ Covers:
 
 **Blocked by:** 04 (Admin `list` / `revoke`) — done
 
-**Status:** ready-for-human
+**Status:** done
 
 - [x] `hacs.json` zip_release + filename; manifest URLs point at `pzeinlinger/ha-iroh`
 - [ ] Release workflow builds x86_64 + aarch64 musl binaries and uploads `ha_iroh.zip`; zip layout verified with `unzip -l`
@@ -40,3 +40,5 @@ User steps:
 
 Review fixes applied: atomic binary replace, recopy tests, layout check in CI, no `workflow_dispatch`, README/SPEC wording. Checkbox 3 stays open: in-container only ran `--help`; `BridgeProcess.start()` was not run against the real binary in HA.
 Switched release workflow from QEMU to native per-arch runners (build matrix + release job zips artifacts); script gained ZIP=0 and empty ARCHES.
+
+- 2026-10-11: HACS install on the user's HA verified end to end (zip from release v0.1.0, integration setup, pairing). Done.
