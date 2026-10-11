@@ -81,7 +81,7 @@ private class Live(val tunnel: Tunnel, val proxy: LoopbackProxy, val client: HaC
 /** Main screen: the HA frontend of [serverId] through the loopback proxy (SPEC §8.6). */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () -> Unit, onInfo: (String?) -> Unit = {}, modifier: Modifier = Modifier) {
+fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () -> Unit, onInfo: (List<String>?) -> Unit = {}, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
@@ -186,9 +186,9 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
 
     BackHandler(canBack) { web.goBack() }
 
-    LaunchedEffect(serverId) { // iroh path info (relay/direct, rtt) for the bar, polled while connected
+    LaunchedEffect(serverId) { // iroh paths (addr, rtt, selected) for the bar, polled while connected
         while (true) {
-            onInfo(withContext(Dispatchers.IO) { state.live.get()?.tunnel?.let { runCatching { it.connInfo() }.getOrNull() } })
+            onInfo(withContext(Dispatchers.IO) { state.live.get()?.tunnel?.let { runCatching { it.paths() }.getOrNull() } })
             kotlinx.coroutines.delay(2_000)
         }
     }
@@ -257,32 +257,40 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
     }
 }
 
-private val PATH = Regex("""(ip|relay):\S+ (\d+)ms(?: \(\+(\d+) paths?\))?""")
+private val PATH = Regex("""(ip|relay):(\S+) (\d+)ms""")
 
-/** `Tunnel.connInfo()` -> "Direct · 2 ms" / "Relay · 40 ms" (+ " · 2 paths" when there are alternatives). */
-fun pathLabel(raw: String): String {
-    val m = PATH.matchEntire(raw) ?: return raw.replaceFirstChar { it.uppercase() }
-    val (kind, rtt, extra) = m.destructured
-    return (if (kind == "ip") "Direct" else "Relay") + " · $rtt ms" + if (extra.isEmpty()) "" else " · ${extra.toInt() + 1} paths"
+/** One `Tunnel.paths()` entry -> "10.1.1.1:5000 · 2 ms" / "relay euc1-1.relay.n0.iroh.link · 40 ms"; "* " (selected) -> " · active". */
+fun pathLabel(line: String): String {
+    val m = PATH.matchEntire(line.removePrefix("* ")) ?: return line
+    val (kind, addr, rtt) = m.destructured
+    val where = if (kind == "ip") addr else "relay " + addr.removePrefix("https://").removeSuffix("/").removeSuffix(".")
+    return "$where · $rtt ms" + if (line.startsWith("* ")) " · active" else ""
+}
+
+/** Bar subtitle: "Direct · 2 ms" / "Relay · 40 ms" for the selected path (+ " · N paths" when there are alternatives); long-press shows the addresses. */
+fun pathSummary(paths: List<String>): String {
+    val sel = paths.firstOrNull { it.startsWith("* ") } ?: paths.firstOrNull() ?: return "No path"
+    val m = PATH.matchEntire(sel.removePrefix("* ")) ?: return sel
+    return (if (m.groupValues[1] == "ip") "Direct" else "Relay") + " · ${m.groupValues[3]} ms" + if (paths.size > 1) " · ${paths.size} paths" else ""
 }
 
 /** Top bar: server name (tap = server switcher), path info subtitle, overflow -> Settings. */
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun DashboardBar(servers: List<Server>, activeId: String, info: String?, onPick: (Server) -> Unit, onSettings: () -> Unit) {
+fun DashboardBar(servers: List<Server>, activeId: String, paths: List<String>?, onPick: (Server) -> Unit, onSettings: () -> Unit) {
     val ctx = LocalContext.current
     var pick by remember { mutableStateOf(false) }
     var more by remember { mutableStateOf(false) }
     TopAppBar(
         title = {
             Box {
-                // long-press: the raw iroh path (address, rtt) for debugging
-                Column(Modifier.combinedClickable(onLongClick = { info?.let { Toast.makeText(ctx, it, Toast.LENGTH_LONG).show() } }) { pick = true }) {
+                // long-press: every open iroh path (address, rtt, which is active)
+                Column(Modifier.combinedClickable(onLongClick = { paths?.let { Toast.makeText(ctx, it.joinToString("\n", transform = ::pathLabel), Toast.LENGTH_LONG).show() } }) { pick = true }) {
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Text(servers.firstOrNull { it.id == activeId }?.name ?: "?", maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                         Icon(Icons.Filled.ArrowDropDown, null)
                     }
-                    Text(info?.let(::pathLabel) ?: "Connecting…", style = MaterialTheme.typography.labelSmall)
+                    Text(paths?.let(::pathSummary) ?: "Connecting…", style = MaterialTheme.typography.labelSmall)
                 }
                 DropdownMenu(pick, { pick = false }) {
                     servers.forEach { s -> DropdownMenuItem({ Text(s.name) }, { pick = false; onPick(s) }) }

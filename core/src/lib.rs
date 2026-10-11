@@ -199,19 +199,13 @@ impl Tunnel {
         self.conn.close(0u32.into(), b"bye");
     }
 
-    /// Human-readable snapshot of the selected network path, e.g. `direct 192.168.1.5:4433 12ms (+1 path)`.
-    pub fn conn_info(&self) -> String {
-        let paths = self.conn.paths();
-        let Some(p) = paths.iter().find(|p| p.is_selected()).or_else(|| paths.iter().next()) else {
-            return "no path".into();
-        };
-        let extra = paths.len().saturating_sub(1);
-        // TransportAddr's Display already carries an `ip:` / `relay:` prefix
-        let mut s = format!("{} {}ms", p.remote_addr(), p.rtt().as_millis());
-        if extra > 0 {
-            s.push_str(&format!(" (+{extra} path{})", if extra > 1 { "s" } else { "" }));
-        }
-        s
+    /// Every open path, `ip:`/`relay:` addr + rtt, selected one prefixed with `* `.
+    pub fn paths(&self) -> Vec<String> {
+        self.conn
+            .paths()
+            .iter()
+            .map(|p| format!("{}{} {}ms", if p.is_selected() { "* " } else { "" }, p.remote_addr(), p.rtt().as_millis()))
+            .collect()
     }
 }
 

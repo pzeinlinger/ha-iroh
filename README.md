@@ -69,6 +69,7 @@ Bug reports and PRs welcome at [github.com/pzeinlinger/ha-iroh](https://github.c
 - **Before a PR**: `cargo test --workspace`, `cd android && ./gradlew testDebugUnitTest`, and the integration tests (see below). Keep PRs small and on-topic; open an issue first for anything that changes the protocol or the pairing flow.
 - **Scope**: the non-goals above are deliberate. PRs adding sensors, notifications or widgets will be declined; the official app covers them.
 - **Style**: no new dependencies for things a few lines can do. Rust is `cargo fmt` + `cargo clippy` clean, Kotlin follows the Android Studio defaults.
+- **LLM use**: most of this code was written with an LLM, reviewed and tested by me. LLM-assisted PRs are fine under the same rule: you read it, you tested it, you can explain it.
 
 ## Local development
 
