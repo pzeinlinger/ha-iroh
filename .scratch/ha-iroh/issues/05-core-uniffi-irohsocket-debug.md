@@ -6,7 +6,7 @@ Covers: `core` cdylib with uniffi API (`Core(dataDir, relay)`, `endpointId()`, `
 
 **Blocked by:** 01 (Workspace skeleton + devenv), 03 (QR pairing)
 
-**Status:** in-progress (only x86_64 run unverified)
+**Status:** done (x86_64 emulator never run: Apple silicon)
 
 - [x] Debug screen: paste URI → pair → BridgeInfo stored; GET `/api/` shows response body + status
 - [x] EndpointId is stable across app restarts (key persisted); "unpair" wipes it

@@ -4,7 +4,7 @@
 
 **Blocked by:** 09 (Assist text: QS tile + shortcuts + bottom sheet), 11 (Dashboard WebView + loopback proxy + external_auth)
 
-**Status:** ready-for-human
+**Status:** done (user verified 2026-10-11)
 
 - [x] Rename / unpair (wipes that server's tokens; wiping the app key only when last server is removed is a decision to record) / re-login per server
 - [x] Default Assist server selectable; sheet opens on it

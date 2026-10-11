@@ -6,7 +6,7 @@ Covers Rust side: `Tunnel.startLoopbackProxy()` → `LoopbackProxy { port(), tok
 
 **Blocked by:** 06 (Server model + QR scan + login_flow + token storage)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] Main screen shows HA frontend without login; entity state changes appear live (WS through proxy)
 - [x] `curl -H 'Host: evil' http://127.0.0.1:<port>/` → 403; correct Host → proxied

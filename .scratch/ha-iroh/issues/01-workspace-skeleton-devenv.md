@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] `devenv shell` (or direnv) provides rustc, cargo, cargo-ndk, uniffi-bindgen, JDK 17; `ANDROID_HOME`/`ANDROID_NDK_HOME` point at the Android Studio SDK
 - [x] `cargo build` passes on an empty workspace with crates `proto`, `bridge`, `core`

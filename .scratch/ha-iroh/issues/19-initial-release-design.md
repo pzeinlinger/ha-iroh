@@ -25,7 +25,7 @@ Screens
 
 Out of scope: dashboard WebView content, Assist sheet (own theme), onboarding tour.
 
-**Status:** ready-for-human
+**Status:** done (user verified 2026-10-11)
 
 - [x] `sensor`/`binary_sensor` out of `toSpec()`, `Spec.ReadOnly` deleted, `ControlMapping` tests updated
 - [x] Registry filter (entity_category / hidden_by / disabled_by) persisted by `refreshAreas`, unit test
@@ -37,7 +37,7 @@ Out of scope: dashboard WebView content, Assist sheet (own theme), onboarding to
 - [x] WebView login, `LoginFlow.kt` deleted
 - [x] Detail sectioned, dev buttons removed, Unpair confirm
 - [x] `./gradlew testDebugUnitTest` green; emulator E2E against throwaway Docker HA: pair, WebView login, pick entities, tile appears; light + dark screenshots
-- [ ] User: pairing + WebView login on the phone before commit
+- [x] User: pairing + WebView login on the phone before commit
 
 ## Comments
 

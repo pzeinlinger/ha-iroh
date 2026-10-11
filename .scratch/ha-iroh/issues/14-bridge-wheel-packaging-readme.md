@@ -18,8 +18,8 @@ Covers:
 **Status:** done
 
 - [x] `hacs.json` zip_release + filename; manifest URLs point at `pzeinlinger/ha-iroh`
-- [ ] Release workflow builds x86_64 + aarch64 musl binaries and uploads `ha_iroh.zip`; zip layout verified with `unzip -l`
-- [ ] `ha_iroh.zip` extracted into `custom_components/ha_iroh/` inside `ghcr.io/home-assistant/home-assistant:stable` (both arches via `docker --platform`) → `BridgeProcess.start()` finds, copies, chmods and runs the bundled binary
+- [x] Release workflow builds x86_64 + aarch64 musl binaries and uploads `ha_iroh.zip`; zip layout verified with `unzip -l`
+- [x] `ha_iroh.zip` extracted into `custom_components/ha_iroh/` inside `ghcr.io/home-assistant/home-assistant:stable` (both arches via `docker --platform`) → `BridgeProcess.start()` finds, copies, chmods and runs the bundled binary
 - [x] `shutil.which` override still works (tests in `tests/` updated)
 - [x] Options flow has `bind_port` (validated 0 or 1024–65535) and it lands in `bridge.toml`; tests cover it
 - [x] README covers HACS install, pairing, relay override, standalone bridge, `ip_ban` risk
