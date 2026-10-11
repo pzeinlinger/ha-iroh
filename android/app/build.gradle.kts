@@ -12,8 +12,18 @@ android {
         applicationId = "dev.ha_iroh.app"
         minSdk = 31
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = System.getenv("VERSION_CODE")?.toInt() ?: 1
+        versionName = System.getenv("VERSION_NAME") ?: "0.0.0-dev"
+    }
+    // Signed only when KEYSTORE_PATH is set (CI); otherwise release is unsigned.
+    val keystore = System.getenv("KEYSTORE_PATH")
+    buildTypes.getByName("release") {
+        if (keystore != null) signingConfig = signingConfigs.create("release") {
+            storeFile = file(keystore)
+            storePassword = System.getenv("KEYSTORE_PASS")
+            keyAlias = System.getenv("KEY_ALIAS")
+            keyPassword = System.getenv("KEY_PASS")
+        }
     }
     buildFeatures { compose = true; buildConfig = true }
 }

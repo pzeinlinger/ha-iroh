@@ -12,3 +12,4 @@ android/.kotlin/
 __pycache__/
 custom_components/ha_iroh/bin/
 dist/
+*.jks
