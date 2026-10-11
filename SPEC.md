@@ -22,7 +22,7 @@ Everything else from the official HA app is out of scope: no sensors, no notific
 | App stack | Kotlin + Jetpack Compose, Rust core via **uniffi** + **cargo-ndk** |
 | Bridge | Rust binary, **dumb pipe**: iroh bi-stream ⇄ TCP to HA:8123. Shipped as static musl binaries bundled in the HACS release zip and run as a subprocess by a **HA custom integration** (HACS). Must work on HA Container (no Supervisor/add-ons) |
 | Device management | Paired phones are HA **devices** of the `ha_iroh` integration: pairing QR via config flow, delete device = revoke |
-| HA auth | On phone, via HA **`/auth/login_flow`** native form (username/password + MFA steps) → refresh token |
+| HA auth | On phone, via HA's own login page (**`/auth/authorize`** in a WebView over the loopback proxy; any auth provider incl. MFA) → refresh token |
 | Bridge access | **Allowlist of app EndpointIds**, filled via **QR pairing** with one-time code |
 | Relay | n0 public relays by default, **configurable** (custom relay URLs) |
 | Connection lifetime | **No warm keeping.** Cold connect when the panel or Assist opens, close when done |
@@ -181,10 +181,10 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
 ### 8.2 Setup flow
 1. Scan the QR (CameraX + ML Kit or ZXing). Manual URI paste is the fallback.
 2. `Core.pair`, then store BridgeInfo.
-3. Login screen using HA login_flow:
-   - `POST /auth/login_flow` with `{client_id, handler:["homeassistant",null], redirect_uri}`
-   - Loop `POST /auth/login_flow/{flow_id}`, rendering the `data_schema` steps (username/password, MFA code)
-   - On `create_entry`, take the `result` code and `POST /auth/token` with `grant_type=authorization_code` → access + refresh token
+3. Login: a WebView loads `/auth/authorize?client_id=…&redirect_uri=homeassistant://auth-callback` through a fresh tunnel + `startLoopbackProxy()` (same origin lock as the dashboard).
+   - HA renders its own login page (any auth provider, MFA included)
+   - The `homeassistant://auth-callback?code=…` navigation is intercepted in `shouldOverrideUrlLoading`; `POST /auth/token` with `grant_type=authorization_code` → access + refresh token
+   - WebView cookies are cleared afterwards
 4. Store the refresh token encrypted (Keystore-backed Tink AEAD, see §8.0).
 5. Entity picker: list the supported domains and let the user choose which appear in Device Controls. The Android panel also has its own favorites UI.
 
@@ -290,7 +290,7 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
 | M1 | bridge + proto + desktop cli | `cli pair <uri>` then `cli curl /api/` returns HA's 401 response (proves the tunnel). A non-allowlisted id is rejected. `revoke` over stdin cuts a live conn |
 | M1b | HA integration | HACS install on HA Container → config flow shows QR → `cli pair` creates a device in HA → deleting the device revokes it |
 | M2 | core uniffi + IrohSocket + OkHttp | App debug screen: GET `/api/` through the tunnel shows a response |
-| M3 | QR pairing + login_flow + token storage | Fresh install → scan → login (incl. TOTP MFA) → authenticated WS `auth_ok`. Survives app restart |
+| M3 | QR pairing + WebView login + token storage | Fresh install → scan → login (incl. TOTP MFA) → authenticated WS `auth_ok`. Survives app restart |
 | M4 | Device Controls | Panel shows chosen entities. Toggling a light in HA updates the tile live, and the tile toggles HA. Cached states appear before connect completes |
 | M5 | Assist voice + text | Tile → speak "turn on kitchen light" → light turns on, transcript + reply shown, TTS plays. Text input works |
 | M6 | Dashboard | Main screen shows the HA frontend without a login prompt; live updates work (WS through proxy). A request from another origin/Host to the proxy port gets 403. Leaving the screen closes the port |

@@ -1,0 +1,7 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- solid house with an arched portal cut through the base and a peer node in it; single-color so it doubles as monochrome/tile glyph; all content inside the 66dp safe circle -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M63,74 C63,75.33 63.67,76 65,76 L73,76 C75.67,76 77,74.67 77,72 L77,53 C77,50.33 75.99,48.13 73.98,46.38 L57.77,32.28 C55.26,30.09 52.74,30.09 50.23,32.28 L34.02,46.38 C32.01,48.13 31,50.33 31,53 L31,72 C31,74.67 32.33,76 35,76 L43,76 C44.33,76 45,75.33 45,74 L45,62 A9,9 0 0 1 63,62 Z" />
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M49.5,62.5 A4.5,4.5 0 1 0 58.5,62.5 A4.5,4.5 0 1 0 49.5,62.5 Z" />
+</vector>

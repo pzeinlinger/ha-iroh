@@ -2,6 +2,7 @@ package dev.ha_iroh.app
 
 import android.annotation.SuppressLint
 import android.util.Log
+import android.widget.Toast
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
@@ -9,7 +10,12 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -63,7 +69,7 @@ document.addEventListener("touchstart", e => {
 }, {capture: true, passive: true});
 """
 
-private fun String?.inOrigin(origin: String?) = this != null && origin != null && (this == origin || startsWith("$origin/"))
+internal fun String?.inOrigin(origin: String?) = this != null && origin != null && (this == origin || startsWith("$origin/"))
 
 /** One resume..pause worth of tunnel + proxy. */
 private class Live(val tunnel: Tunnel, val proxy: LoopbackProxy, val client: HaClient) {
@@ -213,7 +219,7 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
                         }
                     } catch (e: CancellationException) { throw e
                     } catch (e: ReloginRequired) { swipe.isRefreshing = false; onRelogin(); return@launch
-                    } catch (e: Exception) { swipe.isRefreshing = false; error = "connect failed: $e"; return@launch }
+                    } catch (e: Exception) { swipe.isRefreshing = false; error = "Connect failed: ${e.userMessage()}"; return@launch }
                     if (!isActive) {
                         state.live.getAndSet(null)?.let { withContext(NonCancellable + Dispatchers.IO) { it.close() } }
                         return@launch
@@ -251,22 +257,43 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
     }
 }
 
-/** Top bar: server switcher + gear to the server list. */
+private val PATH = Regex("""(ip|relay):\S+ (\d+)ms(?: \(\+(\d+) paths?\))?""")
+
+/** `Tunnel.connInfo()` -> "Direct · 2 ms" / "Relay · 40 ms" (+ " · 2 paths" when there are alternatives). */
+fun pathLabel(raw: String): String {
+    val m = PATH.matchEntire(raw) ?: return raw.replaceFirstChar { it.uppercase() }
+    val (kind, rtt, extra) = m.destructured
+    return (if (kind == "ip") "Direct" else "Relay") + " · $rtt ms" + if (extra.isEmpty()) "" else " · ${extra.toInt() + 1} paths"
+}
+
+/** Top bar: server name (tap = server switcher), path info subtitle, overflow -> Settings. */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun DashboardBar(servers: List<Server>, activeId: String, info: String?, onPick: (Server) -> Unit, onSettings: () -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-        Box(Modifier.weight(1f)) {
-            TextButton({ open = true }) {
-                Column {
-                    Text((servers.firstOrNull { it.id == activeId }?.name ?: "?") + " ▾")
-                    Text(info ?: "connecting…", style = MaterialTheme.typography.labelSmall)
+    val ctx = LocalContext.current
+    var pick by remember { mutableStateOf(false) }
+    var more by remember { mutableStateOf(false) }
+    TopAppBar(
+        title = {
+            Box {
+                // long-press: the raw iroh path (address, rtt) for debugging
+                Column(Modifier.combinedClickable(onLongClick = { info?.let { Toast.makeText(ctx, it, Toast.LENGTH_LONG).show() } }) { pick = true }) {
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text(servers.firstOrNull { it.id == activeId }?.name ?: "?", maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        Icon(Icons.Filled.ArrowDropDown, null)
+                    }
+                    Text(info?.let(::pathLabel) ?: "Connecting…", style = MaterialTheme.typography.labelSmall)
+                }
+                DropdownMenu(pick, { pick = false }) {
+                    servers.forEach { s -> DropdownMenuItem({ Text(s.name) }, { pick = false; onPick(s) }) }
                 }
             }
-            DropdownMenu(open, { open = false }) {
-                servers.forEach { s -> DropdownMenuItem({ Text(s.name) }, { open = false; onPick(s) }) }
+        },
+        actions = {
+            Box {
+                IconButton({ more = true }) { Icon(Icons.Filled.MoreVert, "More") }
+                DropdownMenu(more, { more = false }) { DropdownMenuItem({ Text("Settings") }, { more = false; onSettings() }) }
             }
-        }
-        TextButton(onSettings) { Text("⚙") }
-    }
+        },
+    )
 }

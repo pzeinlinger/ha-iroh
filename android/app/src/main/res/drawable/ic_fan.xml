@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <!-- hand-drawn: three blades + hub (no Material Symbols fan path at hand) -->
+    <group android:pivotX="12" android:pivotY="12">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M12,2.5c1.9,0 3,1.9 3,4.2s-1.4,4.3 -3,4.3 -3,-2 -3,-4.3 1.1,-4.2 3,-4.2z" />
+    </group>
+    <group android:rotation="120" android:pivotX="12" android:pivotY="12">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M12,2.5c1.9,0 3,1.9 3,4.2s-1.4,4.3 -3,4.3 -3,-2 -3,-4.3 1.1,-4.2 3,-4.2z" />
+    </group>
+    <group android:rotation="240" android:pivotX="12" android:pivotY="12">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M12,2.5c1.9,0 3,1.9 3,4.2s-1.4,4.3 -3,4.3 -3,-2 -3,-4.3 1.1,-4.2 3,-4.2z" />
+    </group>
+    <path android:fillColor="#FFFFFFFF" android:pathData="M12,12m-1.6,0a1.6,1.6 0 1,0 3.2,0a1.6,1.6 0 1,0 -3.2,0" />
+</vector>
