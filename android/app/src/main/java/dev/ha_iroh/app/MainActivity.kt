@@ -95,7 +95,8 @@ class MainActivity : ComponentActivity() {
         if (android.os.Build.VERSION.SDK_INT >= 36 && checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(arrayOf(Manifest.permission.ACCESS_LOCAL_NETWORK), 0)
         // debug-only: adb ... --es ticket <uri> opens Add with the URI prefilled
-        val ticket = if (savedInstanceState == null) intent.getStringExtra("ticket") else null // not again after a config recreate
+        // debug builds only: the activity is exported, so any app could otherwise prefill a hostile pairing URI
+        val ticket = if (BuildConfig.DEBUG && savedInstanceState == null) intent.getStringExtra("ticket") else null // not again after a config recreate
         setContent {
             AppTheme {
                 val servers by app.store.servers.collectAsState()
@@ -472,6 +473,8 @@ private fun Detail(app: App, id: String, onBack: () -> Unit, onNavigate: (Screen
                     dialog = Dlg.None
                     scope.launch {
                         withContext(NonCancellable + Dispatchers.IO) {
+                            // best effort: HA refresh tokens never expire, so revoke server-side before forgetting it
+                            runCatching { app.manager.client(server).revoke() }
                             app.manager.release(id)
                             app.store.remove(id)
                             File(app.filesDir, "entities-$id.json").delete()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -54,6 +55,11 @@ async def _options_updated(hass: HomeAssistant, entry: HaIrohConfigEntry) -> Non
 async def async_unload_entry(hass: HomeAssistant, entry: HaIrohConfigEntry) -> bool:
     await entry.runtime_data.stop()
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: HaIrohConfigEntry) -> None:
+    # key + allowlist: otherwise re-adding the integration restores every paired phone's access
+    await hass.async_add_executor_job(shutil.rmtree, hass.config.path("ha_iroh"), True)
 
 
 async def async_remove_config_entry_device(

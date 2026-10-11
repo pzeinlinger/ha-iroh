@@ -151,6 +151,9 @@ class HaClient(
 
     suspend fun refresh(): String = refreshTokens().str("access_token")
 
+    /** Revokes the refresh token in HA (`action=revoke`; HA answers 200 even for unknown tokens). */
+    suspend fun revoke() { http.token(baseUrl, "action" to "revoke", "token" to refreshToken) }
+
     private var cached: Pair<String, Long>? = null // access token, expiry (epoch ms)
 
     /** Cached access token + seconds left (for the WebView's external_auth); refreshes if <30 s left or [force]. */
