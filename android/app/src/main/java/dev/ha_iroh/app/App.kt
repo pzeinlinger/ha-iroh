@@ -1,6 +1,11 @@
 package dev.ha_iroh.app
 
 import android.app.Application
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.util.Log
+import kotlin.concurrent.thread
 import uniffi.ha_iroh_core.Core
 import uniffi.ha_iroh_core.RelayConfig
 
@@ -13,6 +18,27 @@ class App : Application() {
 
     @Synchronized
     fun core(): Core = _core ?: Core(filesDir.path, relay()).also { _core = it }
+
+    override fun onCreate() {
+        super.onCreate()
+        // Process-wide, never unregistered. Android gives iroh no netlink, so tell it about changes.
+        var lastTransports = -1
+        getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) = hint()
+            override fun onLost(network: Network) = hint()
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                val t = listOf(NetworkCapabilities.TRANSPORT_WIFI, NetworkCapabilities.TRANSPORT_CELLULAR, NetworkCapabilities.TRANSPORT_VPN)
+                    .fold(0) { m, tr -> if (caps.hasTransport(tr)) m or (1 shl tr) else m }
+                if (t != lastTransports) { lastTransports = t; hint() }
+            }
+        })
+    }
+
+    /** Skips if no Core yet; may race with [wipeCore]. */
+    private fun hint() {
+        val c = _core ?: return
+        thread { try { c.networkChange() } catch (e: Exception) { Log.w("App", "networkChange", e) } }
+    }
 
     val prefs by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
 
