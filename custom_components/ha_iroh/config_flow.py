@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-import probatio
+try:
+    import probatio as vol  # HA >= 2026.9
+except ImportError:
+    import voluptuous as vol
 
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -53,9 +56,9 @@ class HaIrohOptionsFlow(OptionsFlow):
             return self.async_abort(reason="bridge_unavailable")
         return self.async_show_form(
             step_id="pair",
-            data_schema=probatio.Schema(
+            data_schema=vol.Schema(
                 {
-                    probatio.Optional("qr_code"): QrCodeSelector(
+                    vol.Optional("qr_code"): QrCodeSelector(
                         QrCodeSelectorConfig(
                             data=ticket,
                             scale=6,
@@ -82,11 +85,11 @@ class HaIrohOptionsFlow(OptionsFlow):
             cur = user_input
         return self.async_show_form(
             step_id="settings",
-            data_schema=probatio.Schema(
+            data_schema=vol.Schema(
                 {
-                    probatio.Required(CONF_NAME, default=cur[CONF_NAME]): str,
-                    probatio.Required(CONF_RELAY, default=cur[CONF_RELAY]): str,
-                    probatio.Required(CONF_BIND_PORT, default=cur[CONF_BIND_PORT]): int,
+                    vol.Required(CONF_NAME, default=cur[CONF_NAME]): str,
+                    vol.Required(CONF_RELAY, default=cur[CONF_RELAY]): str,
+                    vol.Required(CONF_BIND_PORT, default=cur[CONF_BIND_PORT]): int,
                 }
             ),
             errors=errors,
