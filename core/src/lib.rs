@@ -152,7 +152,8 @@ impl Core {
 
     pub fn connect(&self, bridge: BridgeInfo) -> Result<Arc<Tunnel>, CoreError> {
         let info: Info = serde_json::from_str(&bridge.info_json).map_err(io)?;
-        // Relay mode is per-Endpoint (set in `new`); the stored relay is informational for now.
+        // `info.addr` already carries the bridge's relay URL(s) from the ticket and iroh dials the peer via those;
+        // the Endpoint's relay mode (set in `new`) only picks this phone's home relay, so `info.relay` needs no handling here.
         RT.block_on(async {
             let conn = tokio::time::timeout(CONNECT_TIMEOUT, self.ep.connect(info.addr, ALPN_TCP))
                 .await
