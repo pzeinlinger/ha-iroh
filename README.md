@@ -1,5 +1,6 @@
 <p align="center"><img src="docs/img/icon.svg" width="96" alt="ha-iroh"></p>
 <h1 align="center">ha-iroh</h1>
+<p align="center"><a href="https://buymeacoffee.com/pzeinlinger"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40"></a></p>
 
 **Reach your Home Assistant from anywhere, without port forwarding, VPNs or a cloud subscription.**
 
@@ -62,7 +63,7 @@ Full design: [SPEC.md](SPEC.md).
 
 ## Contributing
 
-Bug reports and PRs welcome at [github.com/pzeinlinger/ha-iroh](https://github.com/pzeinlinger/ha-iroh/issues).
+Bug reports and PRs welcome at [github.com/pzeinlinger/ha-iroh](https://github.com/pzeinlinger/ha-iroh/issues). If ha-iroh is useful to you, you can [buy me a coffee](https://buymeacoffee.com/pzeinlinger).
 
 - **Report a bug** with HA version, Android version, whether you were on LAN / mobile data, and the bridge log (Settings → System → Logs, filter `ha_iroh`). For the app, `adb logcat -s ha_iroh_core` shows the iroh side.
 - **Before a PR**: `cargo test --workspace`, `cd android && ./gradlew testDebugUnitTest`, and the integration tests (see below). Keep PRs small and on-topic; open an issue first for anything that changes the protocol or the pairing flow.
