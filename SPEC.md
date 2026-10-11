@@ -20,7 +20,7 @@ Everything else from the official HA app is out of scope: no sensors, no notific
 |---|---|
 | Min Android | **12 (minSdk 31)**, target latest |
 | App stack | Kotlin + Jetpack Compose, Rust core via **uniffi** + **cargo-ndk** |
-| Bridge | Rust binary, **dumb pipe**: iroh bi-stream ⇄ TCP to HA:8123. Shipped as a PyPI platform wheel and run as a subprocess by a **HA custom integration** (HACS). Must work on HA Container (no Supervisor/add-ons) |
+| Bridge | Rust binary, **dumb pipe**: iroh bi-stream ⇄ TCP to HA:8123. Shipped as static musl binaries bundled in the HACS release zip and run as a subprocess by a **HA custom integration** (HACS). Must work on HA Container (no Supervisor/add-ons) |
 | Device management | Paired phones are HA **devices** of the `ha_iroh` integration: pairing QR via config flow, delete device = revoke |
 | HA auth | On phone, via HA **`/auth/login_flow`** native form (username/password + MFA steps) → refresh token |
 | Bridge access | **Allowlist of app EndpointIds**, filled via **QR pairing** with one-time code |
@@ -120,7 +120,7 @@ URI: `ha-iroh://pair?t=<base64url(JSON)>`
   - `ready` is printed only after the key and allowlist loaded successfully; stdin EOF or SIGTERM stops the daemon.
 - **Allowlist:** TOML, hot reload or in-memory with atomic write.
 - **Size target:** small. Accept loop, `tokio::io::copy_bidirectional`-style forwarding per stream.
-- **Packaging:** static musl binary, published as a PyPI platform wheel `ha-iroh-bridge` (maturin `bindings = "bin"`), tags `musllinux_1_2` + `manylinux` for `x86_64` and `aarch64`. The HA integration lists it in `manifest.json` `requirements`, so HA installs the right binary with pip. No download code in the integration.
+- **Packaging:** static musl binaries for `x86_64` and `aarch64`, bundled in the HACS release zip (`ha_iroh.zip`, `bin/ha-iroh-bridge-<arch>`). The integration copies the matching one to `<config>/ha_iroh/bin` at start and chmods it. No download code in the integration.
 
 ## 6b. HA integration (`custom_components/ha_iroh/`)
 
@@ -130,7 +130,7 @@ URI: `ha-iroh://pair?t=<base64url(JSON)>`
 - `async_remove_config_entry_device`: send `revoke`, return `True`. `not_found` counts as success (idempotent removal).
 - Options: relay (`n0` / custom URLs), bridge name. Changing options rewrites the TOML and restarts the subprocess.
 - Diagnostics: endpoint id, device list, subprocess state. No secrets.
-- Python: HA's bundled version, no extra Python deps beyond the wheel.
+- Python: HA's bundled version, no extra Python deps.
 
 
 ## 7. Rust core (`core/`, uniffi)
@@ -278,8 +278,8 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
 
 ## 9. Dev environment
 
-- **devenv shell** (`devenv.nix`, `.envrc` with `use devenv`, fish-friendly): Rust stable with targets `aarch64-linux-android`, `x86_64-linux-android`, `cargo-ndk`, uniffi-bindgen, JDK 17, `maturin`. Android SDK/NDK from the system Android Studio install (`ANDROID_HOME` / `ANDROID_NDK_HOME`).
-- **Bridge wheels:** built in CI (GitHub Actions, `maturin` + `cross`/zig for musl aarch64) and published to PyPI on tag. Local dev: `maturin build --release` or plain `cargo build`.
+- **devenv shell** (`devenv.nix`, `.envrc` with `use devenv`, fish-friendly): Rust stable with targets `aarch64-linux-android`, `x86_64-linux-android`, `cargo-ndk`, uniffi-bindgen, JDK 17. Android SDK/NDK from the system Android Studio install (`ANDROID_HOME` / `ANDROID_NDK_HOME`).
+- **Bridge binaries:** built in CI (GitHub Actions, `rust:alpine` per arch via docker) and zipped into `ha_iroh.zip` attached to the release on tag (`scripts/release-zip.sh`). Local dev: plain `cargo build`.
 - APK build stays Gradle (not nixified) for the prototype.
 
 ## 10. Milestones + acceptance
@@ -295,7 +295,7 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
 | M5 | Assist voice + text | Tile → speak "turn on kitchen light" → light turns on, transcript + reply shown, TTS plays. Text input works |
 | M6 | Dashboard | Main screen shows the HA frontend without a login prompt; live updates work (WS through proxy). A request from another origin/Host to the proxy port gets 403. Leaving the screen closes the port |
 | M7 | Multi-server | Two HA instances paired. Controls panel shows both, grouped per server, live. One server offline → only its controls show an error. Assist + dashboard switcher work |
-| M8 | Packaging + polish | Bridge wheel on PyPI for x86_64/aarch64 musl; HACS repo installs cleanly; README with setup steps |
+| M8 | Packaging + polish | Bridge binaries (x86_64/aarch64 musl) bundled in the HACS release zip; HACS repo installs cleanly; README with setup steps |
 
 Build the data model multi-server from M3 onward (server list with one entry), so M7 is mostly UI and parallel connects.
 

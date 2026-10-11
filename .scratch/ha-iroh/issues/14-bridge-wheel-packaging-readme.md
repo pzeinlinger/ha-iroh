@@ -15,11 +15,27 @@ Covers:
 
 **Blocked by:** 04 (Admin `list` / `revoke`) — done
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] `hacs.json` zip_release + filename; manifest URLs point at `pzeinlinger/ha-iroh`
+- [x] `hacs.json` zip_release + filename; manifest URLs point at `pzeinlinger/ha-iroh`
 - [ ] Release workflow builds x86_64 + aarch64 musl binaries and uploads `ha_iroh.zip`; zip layout verified with `unzip -l`
 - [ ] `ha_iroh.zip` extracted into `custom_components/ha_iroh/` inside `ghcr.io/home-assistant/home-assistant:stable` (both arches via `docker --platform`) → `BridgeProcess.start()` finds, copies, chmods and runs the bundled binary
-- [ ] `shutil.which` override still works (tests in `tests/` updated)
-- [ ] Options flow has `bind_port` (validated 0 or 1024–65535) and it lands in `bridge.toml`; tests cover it
-- [ ] README covers HACS install, pairing, relay override, standalone bridge, `ip_ban` risk
+- [x] `shutil.which` override still works (tests in `tests/` updated)
+- [x] Options flow has `bind_port` (validated 0 or 1024–65535) and it lands in `bridge.toml`; tests cover it
+- [x] README covers HACS install, pairing, relay override, standalone bridge, `ip_ban` risk
+
+## Comments
+
+Verified locally (2026-10-11):
+- `scripts/release-zip.sh` (docker, `ARCHES="aarch64"` to build one) builds both musl binaries and `dist/ha_iroh.zip`; `unzip -l` shows zip root = `__init__.py`, `bin/ha-iroh-bridge-{x86_64,aarch64}`, etc.
+- Zip extracted and bundled binary run (`run --help`) inside `ghcr.io/home-assistant/home-assistant:stable` on linux/arm64 and linux/amd64. Full HA boot via `BridgeProcess.start()` not done; resolver/copy/chmod covered by pytest (13 pass).
+- Not verified: the GitHub Actions run, HACS install (need a pushed tag).
+
+User steps:
+1. Push repo to `github.com/pzeinlinger/ha-iroh` and make it public (HACS needs it).
+2. `git tag v0.1.0 && git push origin v0.1.0` (or run the workflow via workflow_dispatch; the release upload only happens on tags).
+3. Check the Actions run and that the release has `ha_iroh.zip`.
+4. HACS -> Custom repositories -> `https://github.com/pzeinlinger/ha-iroh` (Integration), install, restart, add "HA iroh".
+5. Tick the remaining two boxes (CI zip upload, in-HA bundled-binary start) once confirmed.
+
+Review fixes applied: atomic binary replace, recopy tests, layout check in CI, no `workflow_dispatch`, README/SPEC wording. Checkbox 3 stays open: in-container only ran `--help`; `BridgeProcess.start()` was not run against the real binary in HA.
