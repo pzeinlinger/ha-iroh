@@ -90,6 +90,12 @@ class ServerStore(private val ctx: Context) {
 
     suspend fun remove(id: String) = locked { save(_servers.value.filter { it.id != id }) }
 
+    /** Persist a new order; ids not listed keep their place at the end. */
+    suspend fun reorder(ids: List<String>) = locked {
+        val l = _servers.value
+        save(ids.mapNotNull { id -> l.find { it.id == id } } + l.filter { it.id !in ids })
+    }
+
     private companion object { val AD = "servers".toByteArray() }
 }
 
