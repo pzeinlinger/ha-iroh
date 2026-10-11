@@ -121,7 +121,7 @@ class MainActivity : ComponentActivity() {
                 when (val s = cur) {
                     is Screen.Dashboard -> {
                         LaunchedEffect(s.id) { active = s.id }
-                        var info by remember { mutableStateOf<String?>(null) }
+                        var info by remember { mutableStateOf<List<String>?>(null) }
                         Scaffold(topBar = {
                             DashboardBar(servers, s.id, info, { screen = if (it.refreshToken != null) Screen.Dashboard(it.id) else Screen.Detail(it.id) }, { screen = Screen.Settings })
                         }) { pad ->
@@ -411,7 +411,6 @@ private fun Detail(app: App, id: String, onBack: () -> Unit, onNavigate: (Screen
     var pipelines by remember { mutableStateOf<List<Pipeline>?>(null) }
     var dialog by remember { mutableStateOf(Dlg.None) }
     fun toast(m: String) { scope.launch { snack.showSnackbar(m) } }
-
     fun openPipelines() = scope.launch {
         busy = true
         try {
