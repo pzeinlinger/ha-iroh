@@ -162,7 +162,7 @@ private fun SettingsScreen(app: App, home: Screen, onAdd: () -> Unit, onOpen: (S
                 var dragging by remember { mutableStateOf<String?>(null) }
                 var dragY by remember { mutableFloatStateOf(0f) }
                 val heights = remember { mutableStateMapOf<String, Int>() }
-                order.forEach { s ->
+                order.forEach { s -> key(s.id) {
                     ListItem(
                         headlineContent = { Text(s.name) },
                         supportingContent = { Text(if (s.refreshToken == null) "Login required" else "Logged in") },
@@ -190,7 +190,7 @@ private fun SettingsScreen(app: App, home: Screen, onAdd: () -> Unit, onOpen: (S
                             .onSizeChanged { heights[s.id] = it.height }
                             .clickable { onOpen(s.id) },
                     )
-                }
+                } }
                 ListItem({ Text("Add server") }, Modifier.clickable(onClick = onAdd), leadingContent = { Icon(Icons.Filled.Add, null) })
             }
             Section("App")
