@@ -2,55 +2,72 @@ package dev.ha_iroh.app
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.*
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import uniffi.ha_iroh_core.BridgeInfo
-import uniffi.ha_iroh_core.Tunnel
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 private sealed interface Screen {
-    data object List : Screen
+    data object Settings : Screen
     data class Add(val uri: String = "") : Screen
-    data class Login(val server: Server, val tunnel: Tunnel, val flow: LoginFlow, val step: Step) : Screen
+    data class Login(val server: Server) : Screen
     data class Detail(val id: String) : Screen
     data class Entities(val id: String) : Screen
     data class Dashboard(val id: String) : Screen
@@ -67,145 +84,214 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val app = application as App
         // Android 16+ local network protection: without this runtime grant, iroh's LAN holepunch UDP is silently dropped (relay only).
-        if (android.os.Build.VERSION.SDK_INT >= 36 && checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+        if (android.os.Build.VERSION.SDK_INT >= 36 && checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(arrayOf(Manifest.permission.ACCESS_LOCAL_NETWORK), 0)
         // debug-only: adb ... --es ticket <uri> opens Add with the URI prefilled
-        val ticket = intent.getStringExtra("ticket")
+        val ticket = if (savedInstanceState == null) intent.getStringExtra("ticket") else null // not again after a config recreate
         setContent {
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+            AppTheme {
                 val servers by app.store.servers.collectAsState()
                 var loaded by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { app.store.init(); loaded = true }
-                // Start on the first logged-in server's dashboard; Back from the server list returns there.
+                // Start on the first logged-in server's dashboard; Back from Settings returns there.
                 var active by remember { mutableStateOf(intent.getStringExtra(EXTRA_SERVER_ID)) } // last shown dashboard
                 val loggedIn = servers.filter { it.refreshToken != null }
-                val home: Screen = (loggedIn.firstOrNull { it.id == active } ?: loggedIn.firstOrNull())?.let { Screen.Dashboard(it.id) } ?: Screen.List
+                val home: Screen = (loggedIn.firstOrNull { it.id == active } ?: loggedIn.firstOrNull())?.let { Screen.Dashboard(it.id) } ?: Screen.Settings
                 var screen by remember { mutableStateOf<Screen?>(if (ticket != null) Screen.Add(ticket) else null) }
                 // Device Controls tap while the app is already open (the system may reuse this instance): jump to that server
                 LaunchedEffect(launched) {
                     launched?.getStringExtra(EXTRA_SERVER_ID)?.let { id -> servers.firstOrNull { it.id == id } }?.let { screen = if (it.refreshToken != null) Screen.Dashboard(it.id) else Screen.Detail(it.id) }
                     launched = null
                 }
-                val cur = screen ?: if (loaded) home else return@MaterialTheme
-                if (cur is Screen.Dashboard) {
-                    LaunchedEffect(cur.id) { active = cur.id }
-                    var info by remember { mutableStateOf<String?>(null) }
-                    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-                        DashboardBar(servers, cur.id, info, { screen = if (it.refreshToken != null) Screen.Dashboard(it.id) else Screen.Detail(it.id) }, { screen = Screen.List })
-                        key(cur.id) { Dashboard(app, cur.id, { screen = Screen.List }, { screen = Screen.Detail(cur.id) }, { info = it }, Modifier.weight(1f)) }
+                val cur = screen ?: if (loaded) home else return@AppTheme
+                when (val s = cur) {
+                    is Screen.Dashboard -> {
+                        LaunchedEffect(s.id) { active = s.id }
+                        var info by remember { mutableStateOf<String?>(null) }
+                        Scaffold(topBar = {
+                            DashboardBar(servers, s.id, info, { screen = if (it.refreshToken != null) Screen.Dashboard(it.id) else Screen.Detail(it.id) }, { screen = Screen.Settings })
+                        }) { pad ->
+                            key(s.id) { Dashboard(app, s.id, { screen = Screen.Settings }, { screen = Screen.Detail(s.id) }, { info = it }, Modifier.padding(pad)) }
+                        }
                     }
-                    return@MaterialTheme
-                }
-                Column(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp)) {
-                    when (val s = cur) {
-                        Screen.List -> ServerList(app, home, { screen = Screen.Add() }, { screen = Screen.Detail(it) }, { screen = it })
-                        is Screen.Add -> AddServer(app, s.uri, { screen = Screen.List }) { screen = it }
-                        is Screen.Login -> Login(app, s, { screen = Screen.List }) { screen = it }
-                        is Screen.Detail -> Detail(app, s.id, { screen = Screen.List }) { screen = it }
-                        is Screen.Entities -> EntityPicker(app, s.id) { screen = Screen.Detail(s.id) }
-                    }
+                    Screen.Settings -> SettingsScreen(app, home, { screen = Screen.Add() }, { screen = Screen.Detail(it) }, { screen = it })
+                    is Screen.Add -> AddServer(app, s.uri, { screen = Screen.Settings }) { screen = it }
+                    is Screen.Login -> Login(app, s.server, { screen = Screen.Detail(s.server.id) }) { screen = Screen.Detail(s.server.id) }
+                    is Screen.Detail -> Detail(app, s.id, { screen = Screen.Settings }) { screen = it }
+                    is Screen.Entities -> EntityPicker(app, s.id) { screen = Screen.Detail(s.id) }
                 }
             }
         }
     }
 }
 
-/** Opens a tunnel to the server's bridge and starts the HA login flow. */
-private suspend fun beginLogin(app: App, server: Server): Screen.Login = withContext(Dispatchers.IO) {
-    val tunnel = app.core().connect(BridgeInfo(server.bridgeInfoName, server.bridgeInfoJson))
-    try {
-        val flow = LoginFlow(tunnel.okHttpClient())
-        Screen.Login(server, tunnel, flow, flow.start())
-    } catch (e: Throwable) { tunnel.disconnect(); throw e }
-}
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ServerList(app: App, home: Screen, onAdd: () -> Unit, onOpen: (String) -> Unit, onNavigate: (Screen) -> Unit) {
-    BackHandler(home != Screen.List) { onNavigate(home) }
+private fun SettingsScreen(app: App, home: Screen, onAdd: () -> Unit, onOpen: (String) -> Unit, onNavigate: (Screen) -> Unit) {
+    BackHandler(home != Screen.Settings) { onNavigate(home) }
     val servers by app.store.servers.collectAsState()
-    Box(Modifier.fillMaxSize()) {
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            Text("Servers", style = MaterialTheme.typography.headlineSmall)
-            servers.forEach {
-                ListItem(
-                    headlineContent = { Text(it.name) },
-                    supportingContent = { Text(if (it.refreshToken == null) "login required" else "logged in") },
-                    modifier = Modifier.clickable { onOpen(it.id) },
-                )
+    val clipboard = LocalClipboardManager.current
+    val snack = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var endpointId by remember { mutableStateOf("…") }
+    LaunchedEffect(Unit) { endpointId = withContext(Dispatchers.IO) { runCatching { app.core().endpointId() }.getOrElse { "Error: ${it.userMessage()}" } } }
+    var relay by remember { mutableStateOf(app.prefs.getString("relay_urls", "").orEmpty()) }
+    var relayDialog by remember { mutableStateOf(false) }
+
+    Scaffold(topBar = { TopAppBar({ Text("Settings") }, navigationIcon = { if (home != Screen.Settings) BackArrow() }) }, snackbarHost = { SnackbarHost(snack) }) { pad ->
+        Column(Modifier.padding(pad).verticalScroll(rememberScrollState())) {
+            Section("Servers")
+            if (servers.isEmpty()) {
+                Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Filled.Home, null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text("No servers yet", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleMedium)
+                    Button(onAdd, Modifier.padding(top = 16.dp)) { Text("Add server") }
+                }
+            } else {
+                servers.forEach {
+                    ListItem(
+                        headlineContent = { Text(it.name) },
+                        supportingContent = { Text(if (it.refreshToken == null) "Login required" else "Logged in") },
+                        trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
+                        modifier = Modifier.clickable { onOpen(it.id) },
+                    )
+                }
+                ListItem({ Text("Add server") }, Modifier.clickable(onClick = onAdd), leadingContent = { Icon(Icons.Filled.Add, null) })
             }
-            AppSettings(app)
-            Spacer(Modifier.height(80.dp)) // clear of the FAB
+            Section("App")
+            ListItem(
+                { Text("Endpoint ID") },
+                Modifier.clickable { clipboard.setText(AnnotatedString(endpointId)); scope.launch { snack.showSnackbar("Copied") } },
+                supportingContent = { Text(endpointId, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            )
+            ListItem(
+                { Text("Relay") },
+                Modifier.clickable { relayDialog = true },
+                supportingContent = { Text(if (relay.isEmpty()) "Default (n0)" else relay.replace("\n", ", ")) },
+            )
         }
-        ExtendedFloatingActionButton(onClick = onAdd, modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd)) { Text("Add server") }
     }
+    if (relayDialog) RelayDialog(relay, { relay = it; app.prefs.edit().putString("relay_urls", it).apply(); relayDialog = false }) { relayDialog = false }
 }
 
 @Composable
-private fun AppSettings(app: App) {
-    val clipboard = LocalClipboardManager.current
-    var endpointId by remember { mutableStateOf("...") }
-    LaunchedEffect(Unit) { endpointId = withContext(Dispatchers.IO) { runCatching { app.core().endpointId() }.getOrElse { "error: $it" } } }
-    var custom by remember { mutableStateOf(app.prefs.getString("relay_urls", "").orEmpty().isNotEmpty()) }
-    var urls by remember { mutableStateOf(app.prefs.getString("relay_urls", "").orEmpty()) }
+private fun RelayDialog(initial: String, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+    var custom by remember { mutableStateOf(initial.isNotEmpty()) }
+    var urls by remember { mutableStateOf(initial) }
     var invalid by remember { mutableStateOf(false) }
-    fun save(text: String) {
-        val all = parseRelayUrls(text)
-        val ok = all.filter { it.toHttpUrlOrNull() != null }
-        invalid = ok.size != all.size
-        app.prefs.edit().putString("relay_urls", ok.joinToString("\n")).apply()
-    }
-    Text("App settings", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 16.dp))
-    Text("EndpointId", style = MaterialTheme.typography.labelMedium)
-    Text(endpointId, style = MaterialTheme.typography.bodySmall)
-    Button({ clipboard.setText(AnnotatedString(endpointId)) }) { Text("Copy EndpointId") }
-    Text("Relay", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
-    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-        RadioButton(!custom, { custom = false; app.prefs.edit().remove("relay_urls").apply() }); Text("n0 (default)")
-        RadioButton(custom, { custom = true; save(urls) }); Text("custom")
-    }
-    if (custom) OutlinedTextField(urls, {
-        urls = it
-        save(it)
-    }, label = { Text("relay URLs (comma or newline separated)") })
-    if (invalid) Text("invalid URL (not saved)", color = MaterialTheme.colorScheme.error)
-    Text("takes effect after app restart", style = MaterialTheme.typography.labelSmall)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Relay") },
+        text = {
+            Column {
+                Row(Modifier.clickable { custom = false }, verticalAlignment = Alignment.CenterVertically) { RadioButton(!custom, { custom = false }); Text("Default (n0)") }
+                Row(Modifier.clickable { custom = true }, verticalAlignment = Alignment.CenterVertically) { RadioButton(custom, { custom = true }); Text("Custom") }
+                if (custom) OutlinedTextField(urls, { urls = it; invalid = false }, label = { Text("Relay URLs (comma or newline separated)") })
+                if (invalid) Text("Invalid URL", color = MaterialTheme.colorScheme.error)
+                Text("Takes effect after app restart", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelSmall)
+            }
+        },
+        confirmButton = {
+            TextButton({
+                val all = if (custom) parseRelayUrls(urls) else emptyList()
+                if (all.any { it.toHttpUrlOrNull() == null }) invalid = true else onSave(all.joinToString("\n"))
+            }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onDismiss) { Text("Cancel") } },
+    )
 }
 
+private enum class AddMode { Scan, Paste, Connecting, Failed }
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddServer(app: App, initial: String, onBack: () -> Unit, onNext: (Screen) -> Unit) {
     BackHandler(onBack = onBack)
+    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val snack = remember { SnackbarHostState() }
     var uri by remember { mutableStateOf(initial) }
-    var out by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    var scanning by remember { mutableStateOf(false) }
-    val perm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { scanning = it; if (!it) out = "camera permission denied" }
+    var mode by remember { mutableStateOf(if (initial.isNotEmpty()) AddMode.Paste else AddMode.Scan) }
+    var camera by remember { mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
+    var denied by remember { mutableStateOf(false) }
+    val perm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { camera = it; if (!it) { denied = true; mode = AddMode.Paste } }
+    LaunchedEffect(mode) { if (mode == AddMode.Scan && !camera) perm.launch(Manifest.permission.CAMERA) }
 
-    fun pair(u: String) = scope.launch {
-        busy = true
-        out = "pairing..."
-        runCatching {
-            val b = withContext(Dispatchers.IO) { app.core().pair(u.trim(), android.os.Build.MODEL) }
-            beginLogin(app, Server(UUID.randomUUID().toString(), b.name, b.name, b.infoJson))
-        }.onSuccess(onNext).onFailure { out = "error: $it"; busy = false }
+    fun connect(u: String) {
+        val from = mode
+        mode = AddMode.Connecting
+        scope.launch {
+            try {
+                val b = withContext(Dispatchers.IO) { app.core().pair(u.trim(), android.os.Build.MODEL) }
+                val server = Server(UUID.randomUUID().toString(), b.name, b.name, b.infoJson)
+                app.store.upsert(server) // a cancelled first login leaves a "Login required" row instead of losing the pairing
+                onNext(Screen.Login(server))
+            } catch (e: CancellationException) { throw e
+            } catch (e: Exception) {
+                mode = AddMode.Failed
+                snack.showSnackbar("Couldn't connect: ${e.userMessage()}", "Retry", withDismissAction = true, duration = SnackbarDuration.Indefinite)
+                mode = from // retry (or dismiss) reopens the scanner / paste form
+            }
+        }
     }
 
-    Column(Modifier.verticalScroll(rememberScrollState())) {
-        Text("Add server", style = MaterialTheme.typography.headlineSmall)
-        if (scanning) {
-            QrScanner { scanning = false; uri = it; pair(it) }
+    Scaffold(topBar = { TopAppBar({ Text("Add server") }, navigationIcon = { BackArrow() }) }, snackbarHost = { SnackbarHost(snack) }) { pad ->
+        Box(Modifier.padding(pad).fillMaxSize().imePadding()) {
+            when (mode) {
+                AddMode.Scan -> {
+                    Box(Modifier.fillMaxSize().background(Color.Black))
+                    if (camera) QrScanner(Modifier.fillMaxSize()) { uri = it; connect(it) } // else: permission dialog is up
+                    Viewfinder(Modifier.fillMaxSize())
+                    Column(Modifier.align(Alignment.BottomCenter).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Scan the pairing QR code", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                        TextButton({ mode = AddMode.Paste }) { Text("Enter code instead", color = Color.White) }
+                    }
+                }
+                AddMode.Paste -> Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
+                    Text(if (denied) "Camera permission denied. Paste the pairing code instead." else "Paste the pairing code from the bridge.", Modifier.padding(bottom = 16.dp))
+                    OutlinedTextField(uri, { uri = it }, Modifier.fillMaxWidth().heightIn(max = 120.dp), maxLines = 3, label = { Text("ha-iroh://pair?t=…") })
+                    Button({ connect(uri) }, Modifier.padding(top = 16.dp), enabled = uri.isNotBlank()) { Text("Connect") }
+                    TextButton({ denied = false; mode = AddMode.Scan }) { Text("Scan QR instead") }
+                }
+                AddMode.Connecting -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Text("Connecting…", Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium)
+                }
+                AddMode.Failed -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Filled.Warning, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.error)
+                    Text("Couldn't connect", Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium)
+                }
+            }
         }
-        Button(onClick = { perm.launch(Manifest.permission.CAMERA) }, enabled = !busy) { Text("Scan QR") }
-        OutlinedTextField(uri, { uri = it }, label = { Text("ha-iroh://pair?t=...") })
-        Button(onClick = { pair(uri) }, enabled = !busy && uri.isNotBlank()) { Text("Pair") }
-        Text(out)
     }
 }
 
+/** Dimmed camera with a rounded cut-out and corner brackets. */
 @Composable
-private fun QrScanner(onResult: (String) -> Unit) {
+private fun Viewfinder(modifier: Modifier) = Canvas(modifier) {
+    val side = size.minDimension * 0.65f
+    val tl = Offset((size.width - side) / 2, (size.height - side) / 2)
+    val box = Rect(tl, Size(side, side))
+    drawPath(Path().apply {
+        fillType = PathFillType.EvenOdd
+        addRect(Rect(Offset.Zero, size))
+        addRoundRect(RoundRect(box, CornerRadius(24.dp.toPx())))
+    }, Color.Black.copy(alpha = 0.5f))
+    val len = side * 0.18f
+    val w = 5.dp.toPx()
+    fun corner(x: Float, y: Float, dx: Float, dy: Float) {
+        drawLine(Color.White, Offset(x, y), Offset(x + dx * len, y), w, StrokeCap.Round)
+        drawLine(Color.White, Offset(x, y), Offset(x, y + dy * len), w, StrokeCap.Round)
+    }
+    corner(box.left, box.top, 1f, 1f); corner(box.right, box.top, -1f, 1f)
+    corner(box.left, box.bottom, 1f, -1f); corner(box.right, box.bottom, -1f, -1f)
+}
+
+@Composable
+private fun QrScanner(modifier: Modifier, onResult: (String) -> Unit) {
     val ctx = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val view = remember { PreviewView(ctx) }
@@ -236,129 +322,163 @@ private fun QrScanner(onResult: (String) -> Unit) {
             executor.shutdown()
         }
     }
-    AndroidView(modifier = Modifier.fillMaxWidth().height(300.dp), factory = { view })
+    AndroidView(modifier = modifier, factory = { view })
 }
 
-@Composable
-private fun Login(app: App, s: Screen.Login, onCancel: () -> Unit, onNext: (Screen) -> Unit) {
-    BackHandler(onBack = onCancel)
-    DisposableEffect(s.tunnel) { onDispose { Thread { s.tunnel.disconnect() }.start() } }
-    val scope = rememberCoroutineScope()
-    val values = remember(s.step) { mutableStateMapOf<String, String>() }
-    var out by remember(s.step) { mutableStateOf("") }
-    var busy by remember(s.step) { mutableStateOf(false) }
+private enum class Dlg { None, Rename, Pipeline, Unpair }
 
-    Column(Modifier.verticalScroll(rememberScrollState())) {
-        Text("Log in to ${s.server.name}", style = MaterialTheme.typography.headlineSmall)
-        s.step.fields.forEach { f ->
-            OutlinedTextField(
-                values[f.name] ?: "", { values[f.name] = it }, label = { Text(f.name) }, singleLine = true,
-                visualTransformation = if (f.name.contains("password")) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
-            )
-        }
-        s.step.errors.forEach { Text("error: $it") }
-        Button(enabled = !busy, onClick = {
-            scope.launch {
-                busy = true
-                runCatching {
-                    when (val r = s.flow.submit(s.step, values.toMap())) {
-                        is Step -> s.copy(step = r)
-                        is Done -> {
-                            val t = s.flow.exchange(r.code)
-                            app.store.upsert(s.server.copy(refreshToken = t.refresh))
-                            Screen.Detail(s.server.id)
-                        }
-                    }
-                }.onSuccess(onNext).onFailure { out = "error: $it"; busy = false }
-            }
-        }) { Text("Log in") }
-        Text(out)
-    }
-}
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Detail(app: App, id: String, onBack: () -> Unit, onNavigate: (Screen) -> Unit) {
     BackHandler(onBack = onBack)
     val scope = rememberCoroutineScope()
     val server = app.store.servers.collectAsState().value.firstOrNull { it.id == id } ?: return
-    var out by remember { mutableStateOf("") }
+    val snack = remember { SnackbarHostState() }
+    val loggedIn = server.refreshToken != null
     var busy by remember { mutableStateOf(false) }
     var pipelines by remember { mutableStateOf<List<Pipeline>?>(null) }
-    fun run(f: suspend (HaClient) -> String) = scope.launch {
+    var dialog by remember { mutableStateOf(Dlg.None) }
+    fun toast(m: String) { scope.launch { snack.showSnackbar(m) } }
+
+    fun openPipelines() = scope.launch {
         busy = true
-        out = "..."
-        out = try {
-            f(app.manager.client(server))
+        try {
+            pipelines = parsePipelines(app.manager.client(server).connect().sendCommand(buildJsonObject { put("type", "assist_pipeline/pipeline/list") }))
+            dialog = Dlg.Pipeline
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: ReloginRequired) {
             app.store.update(id) { it.copy(refreshToken = null) }
-            "re-login required"
-        } catch (e: Throwable) {
-            "error: $e"
+            toast("Login expired")
+        } catch (e: Exception) {
+            toast("Error: ${e.userMessage()}")
         } finally {
             withContext(NonCancellable + Dispatchers.IO) { app.manager.release(id) }
             busy = false
         }
     }
 
-    Column(Modifier.verticalScroll(rememberScrollState())) {
-        Text(server.name, style = MaterialTheme.typography.headlineSmall)
-        Text("id ${server.id}")
-        var name by remember(server.name) { mutableStateOf(server.name) }
-        OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true)
-        Button(enabled = !busy && name.isNotBlank() && name.trim() != server.name, onClick = { scope.launch { app.store.update(id) { it.copy(name = name.trim()) } } }) { Text("Rename") }
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Switch(server.isDefaultAssist, { if (it) scope.launch { app.store.setDefaultAssist(id) } else scope.launch { app.store.update(id) { s -> s.copy(isDefaultAssist = false) } } })
-            Text(" Default for Assist")
+    Scaffold(
+        topBar = {
+            TopAppBar({ Text(server.name) }, navigationIcon = { BackArrow() },
+                actions = { IconButton({ dialog = Dlg.Rename }) { Icon(Icons.Filled.Edit, "Rename") } })
+        },
+        snackbarHost = { SnackbarHost(snack) },
+    ) { pad ->
+        Column(Modifier.padding(pad).verticalScroll(rememberScrollState())) {
+            Section("Account")
+            ListItem(
+                { Text("Status") },
+                supportingContent = { Text(if (loggedIn) "Logged in" else "Login required") },
+                trailingContent = {
+                    if (loggedIn) TextButton({ scope.launch { app.store.update(id) { it.copy(refreshToken = null) } } }) { Text("Log out") }
+                    else Button({ onNavigate(Screen.Login(server)) }) { Text("Log in") }
+                },
+            )
+            Section("Assist")
+            ListItem(
+                { Text("Default for Assist") },
+                trailingContent = { Switch(server.isDefaultAssist, { if (it) scope.launch { app.store.setDefaultAssist(id) } else scope.launch { app.store.update(id) { s -> s.copy(isDefaultAssist = false) } } }) },
+            )
+            ListItem(
+                { Text("Pipeline") },
+                Modifier.clickable(enabled = loggedIn && !busy) { openPipelines() },
+                supportingContent = { Text(pipelines?.firstOrNull { it.id == server.pipelineId }?.name ?: if (server.pipelineId == null) "HA preferred" else "Custom") },
+                trailingContent = { if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) },
+            )
+            Section("Device Controls")
+            ListItem(
+                { Text("Choose entities") },
+                Modifier.clickable(enabled = loggedIn) { onNavigate(Screen.Entities(id)) },
+                supportingContent = { Text("${server.selectedEntities.count(::isControllable)} selected") },
+                trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
+            )
+            Section("Danger zone")
+            ListItem(
+                { Text("Unpair", color = MaterialTheme.colorScheme.error) },
+                Modifier.clickable { dialog = Dlg.Unpair },
+                supportingContent = { Text("Remove this server from the app") },
+            )
         }
-        if (server.refreshToken == null) {
-            Button(enabled = !busy, onClick = {
-                scope.launch {
-                    busy = true
-                    runCatching { beginLogin(app, server) }.onSuccess(onNavigate).onFailure { out = "error: $it"; busy = false }
-                }
-            }) { Text("Log in") }
-        } else {
-            Button(enabled = !busy, onClick = { run { it.connect().close(); "auth_ok" } }) { Text("Connect (WS auth)") }
-            Button(enabled = !busy, onClick = { run { it.get("/api/") } }) { Text("GET /api/") }
-            Button(enabled = !busy, onClick = { onNavigate(Screen.Entities(id)) }) { Text("Entities") }
-            Button(enabled = !busy, onClick = { scope.launch { app.store.update(id) { it.copy(refreshToken = null) } } }) { Text("Log out") }
-            Text("Pipeline: ${pipelines?.firstOrNull { it.id == server.pipelineId }?.name ?: server.pipelineId ?: "HA preferred"}")
-            Button(enabled = !busy, onClick = {
-                run { c ->
-                    pipelines = parsePipelines(c.connect().sendCommand(buildJsonObject { put("type", "assist_pipeline/pipeline/list") }))
-                    ""
-                }
-            }) { Text("Pipeline") }
-            pipelines?.let { list ->
-                fun pick(pid: String?) = scope.launch { app.store.update(id) { it.copy(pipelineId = pid) }; pipelines = null }
-                TextButton({ pick(null) }) { Text("HA preferred" + if (server.pipelineId == null) " (selected)" else "") }
-                list.forEach { TextButton({ pick(it.id) }) { Text(it.name + (if (it.preferred) " (HA preferred)" else "") + if (it.id == server.pipelineId) " (selected)" else "") } }
-            }
+    }
+
+    when (dialog) {
+        Dlg.None -> {}
+        Dlg.Rename -> {
+            var name by remember { mutableStateOf(server.name) }
+            AlertDialog(
+                onDismissRequest = { dialog = Dlg.None },
+                title = { Text("Rename server") },
+                text = { OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }) },
+                confirmButton = {
+                    TextButton({ scope.launch { app.store.update(id) { it.copy(name = name.trim()) }; dialog = Dlg.None } }, enabled = name.isNotBlank()) { Text("Save") }
+                },
+                dismissButton = { TextButton({ dialog = Dlg.None }) { Text("Cancel") } },
+            )
         }
-        Button(enabled = !busy, onClick = {
-            scope.launch {
-                withContext(NonCancellable + Dispatchers.IO) {
-                    app.manager.release(id)
-                    app.store.remove(id)
-                    File(app.filesDir, "entities-$id.json").delete()
-                    app.areaFile(id).delete()
-                    // Decision: the app key (EndpointId) is wiped only with the last server, so other servers stay paired.
-                    if (app.store.servers.value.isEmpty()) app.wipeCore()
+        Dlg.Pipeline -> AlertDialog(
+            onDismissRequest = { dialog = Dlg.None },
+            title = { Text("Assist pipeline") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    fun pick(pid: String?) { scope.launch { app.store.update(id) { it.copy(pipelineId = pid) }; dialog = Dlg.None } }
+                    Row(Modifier.clickable { pick(null) }, verticalAlignment = Alignment.CenterVertically) { RadioButton(server.pipelineId == null, { pick(null) }); Text("HA preferred") }
+                    pipelines.orEmpty().forEach {
+                        Row(Modifier.clickable { pick(it.id) }, verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(it.id == server.pipelineId, { pick(it.id) }); Text(it.name + if (it.preferred) " (HA preferred)" else "")
+                        }
+                    }
                 }
-                onBack()
-            }
-        }) { Text("Unpair") }
-        Text(out)
+            },
+            confirmButton = { TextButton({ dialog = Dlg.None }) { Text("Close") } },
+        )
+        Dlg.Unpair -> AlertDialog(
+            onDismissRequest = { dialog = Dlg.None },
+            title = { Text("Unpair ${server.name}?") },
+            text = { Text("The server is removed from this app. Pair again to restore access.") },
+            confirmButton = {
+                TextButton({
+                    dialog = Dlg.None
+                    scope.launch {
+                        withContext(NonCancellable + Dispatchers.IO) {
+                            app.manager.release(id)
+                            app.store.remove(id)
+                            File(app.filesDir, "entities-$id.json").delete()
+                            app.areaFile(id).delete()
+                            // Decision: the app key (EndpointId) is wiped only with the last server, so other servers stay paired.
+                            if (app.store.servers.value.isEmpty()) app.wipeCore()
+                        }
+                        onBack()
+                    }
+                }) { Text("Unpair", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton({ dialog = Dlg.None }) { Text("Cancel") } },
+        )
     }
 }
 
+private val DOMAIN_ICON = mapOf(
+    "light" to R.drawable.ic_light, "switch" to R.drawable.ic_switch, "fan" to R.drawable.ic_fan, "climate" to R.drawable.ic_climate)
+// ponytail: no extended icon set; the rest reuse material-icons-core glyphs
+private val CORE_ICON = mapOf<String, ImageVector>("input_boolean" to Icons.Filled.Check, "cover" to Icons.Filled.KeyboardArrowUp, "lock" to Icons.Filled.Lock,
+    "scene" to Icons.Filled.PlayArrow, "script" to Icons.Filled.PlayArrow, "button" to Icons.Filled.PlayArrow)
+
+@Composable
+private fun DomainIcon(domain: String) {
+    val tint = MaterialTheme.colorScheme.onSurfaceVariant
+    DOMAIN_ICON[domain]?.let { Icon(painterResource(it), null, tint = tint) } ?: Icon(CORE_ICON[domain] ?: Icons.Filled.Info, null, tint = tint)
+}
+
 /** Pick which entities (any supported domain) show up in Device Controls; also seeds the state cache. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EntityPicker(app: App, id: String, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     val server = app.store.servers.collectAsState().value.firstOrNull { it.id == id } ?: return
-    var entities by remember { mutableStateOf<Map<String, List<EntityState>>?>(null) }
+    var entities by remember { mutableStateOf<List<EntityState>?>(null) }
+    var reg by remember { mutableStateOf(Registry()) }
     var err by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
     LaunchedEffect(id) {
         var client: HaClient? = null
         try {
@@ -367,36 +487,59 @@ private fun EntityPicker(app: App, id: String, onBack: () -> Unit) {
             val all = EntityDiff.parseStates(session.sendCommand(buildJsonObject { put("type", "get_states") }))
                 .filterValues { it.toSpec() != null }
             withContext(Dispatchers.IO) { app.entityCache(id).let { it.save(it.load() + all) } }
-            entities = all.values.sortedBy { it.entityId }.groupBy { domainOf(it.entityId) }
-            withContext(Dispatchers.IO) { session.refreshAreas(app.areaFile(id)) }
+            reg = withContext(Dispatchers.IO) { loadAreas(app.areaFile(id)) } // last known, until the refresh below lands
+            entities = all.values.toList()
+            reg = withContext(Dispatchers.IO) { session.refreshAreas(app.areaFile(id)) }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Throwable) {
-            err = "error: $e"
+            err = "Error: ${e.userMessage()}"
         } finally {
             withContext(NonCancellable + Dispatchers.IO) { client?.close() }
         }
     }
     val scope = rememberCoroutineScope()
-    LazyColumn {
-        item { Text("Entities on ${server.name}", style = MaterialTheme.typography.headlineSmall) }
-        if (entities == null && err.isEmpty()) item { Text("loading...") }
-        item { Text(err) }
-        entities?.forEach { (domain, list) ->
-            item { Text(domain, style = MaterialTheme.typography.titleMedium) }
-            items(list, key = { it.entityId }) { e ->
-                val on = e.entityId in server.selectedEntities
-                ListItem(
-                    headlineContent = { Text((e.attributes["friendly_name"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: e.entityId) },
-                    supportingContent = { Text(e.entityId) },
-                    trailingContent = {
-                        Checkbox(on, { c ->
-                            scope.launch {
-                                app.store.update(id) {
-                                    it.copy(selectedEntities = if (c) (it.selectedEntities + e.entityId).distinct() else it.selectedEntities - e.entityId)
-                                }
-                            }
-                        })
-                    },
-                )
+    val selected = server.selectedEntities.toSet()
+    val groups = remember(entities, reg, selected, query) { pickerGroups(entities.orEmpty(), reg, selected, query) }
+    val visible = groups.flatMap { g -> g.second.map { it.entityId } }
+    fun setAll(ids: List<String>, on: Boolean) {
+        scope.launch { app.store.update(id) { it.copy(selectedEntities = if (on) (it.selectedEntities + ids).distinct() else it.selectedEntities - ids.toSet()) } }
+    }
+
+    Scaffold(topBar = { TopAppBar({ Text("Device Controls") }, navigationIcon = { BackArrow() }) }) { pad ->
+        Column(Modifier.padding(pad)) {
+            OutlinedTextField(
+                query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), singleLine = true,
+                placeholder = { Text("Search") }, leadingIcon = { Icon(Icons.Filled.Search, null) },
+                trailingIcon = { if (query.isNotEmpty()) IconButton({ query = "" }) { Icon(Icons.Filled.Close, "Clear") } },
+            )
+            if (entities == null && err.isEmpty()) Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            if (err.isNotEmpty()) Text(err, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
+            if (entities != null && groups.isEmpty()) Text("No matching entities", Modifier.padding(16.dp))
+            LazyColumn {
+                if (visible.isNotEmpty()) item("all") {
+                    ListItem({ Text("Select all") }, trailingContent = { Switch(visible.all { it in selected }, { setAll(visible, it) }) })
+                }
+                groups.forEach { (area, list) ->
+                    val ids = list.map { it.entityId }
+                    val all = ids.all { it in selected }
+                    item("h:$area") {
+                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Section(area, Modifier)
+                            TextButton({ setAll(ids, !all) }) { Text(if (all) "Clear" else "Select all") }
+                        }
+                    }
+                    items(list, key = { it.entityId }) { e ->
+                        val on = e.entityId in selected
+                        ListItem(
+                            headlineContent = { Text(e.title()) },
+                            supportingContent = { Text(e.entityId) },
+                            leadingContent = { DomainIcon(domainOf(e.entityId)) },
+                            trailingContent = { Switch(on, { setAll(listOf(e.entityId), it) }) },
+                            modifier = Modifier.clickable { setAll(listOf(e.entityId), !on) },
+                        )
+                    }
+                }
             }
         }
     }
