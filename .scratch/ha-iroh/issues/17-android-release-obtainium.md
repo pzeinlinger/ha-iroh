@@ -14,13 +14,13 @@ Covers:
 
 **Blocked by:** 14 (release workflow exists; committed f1d410b)
 
-**Status:** ready-for-human
+**Status:** done (Obtainium install verified on the phone 2026-10-11)
 
 - [x] `./gradlew assembleRelease` locally without signing env produces an unsigned APK; with a throwaway keystore + env it produces a signed one (`apksigner verify`)
 - [x] `versionName`/`versionCode` come from env; defaults work
 - [x] Workflow job `apk` builds arm64 `.so` + release APK and attaches `ha-iroh-<version>.apk` to the release (CI run needs the user's tag; verify YAML + commands locally)
 - [x] README Obtainium section + one-time signing setup steps
-- [ ] User: keystore generated, secrets set, tag pushed, Obtainium installs the APK on the phone
+- [x] User: keystore generated, secrets set, tag pushed, Obtainium installs the APK on the phone
 
 ## Comments
 
