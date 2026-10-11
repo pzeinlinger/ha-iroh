@@ -14,10 +14,19 @@ Covers:
 
 **Blocked by:** 14 (release workflow exists; committed f1d410b)
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] `./gradlew assembleRelease` locally without signing env produces an unsigned APK; with a throwaway keystore + env it produces a signed one (`apksigner verify`)
-- [ ] `versionName`/`versionCode` come from env; defaults work
-- [ ] Workflow job `apk` builds arm64 `.so` + release APK and attaches `ha-iroh-<version>.apk` to the release (CI run needs the user's tag; verify YAML + commands locally)
-- [ ] README Obtainium section + one-time signing setup steps
+- [x] `./gradlew assembleRelease` locally without signing env produces an unsigned APK; with a throwaway keystore + env it produces a signed one (`apksigner verify`)
+- [x] `versionName`/`versionCode` come from env; defaults work
+- [x] Workflow job `apk` builds arm64 `.so` + release APK and attaches `ha-iroh-<version>.apk` to the release (CI run needs the user's tag; verify YAML + commands locally)
+- [x] README Obtainium section + one-time signing setup steps
 - [ ] User: keystore generated, secrets set, tag pushed, Obtainium installs the APK on the phone
+
+## Comments
+
+2026-10-11: Built. `android/app/build.gradle.kts` (env-driven versionName/versionCode, release signingConfig only if KEYSTORE_PATH set, minify off), `*.jks` gitignored, `apk` job appended to `.github/workflows/release.yml`, `scripts/setup-signing.sh`, README Android section (Obtainium + debug-uninstall note + maintainer pointer).
+Verified locally: no env -> `app-release-unsigned.apk`; throwaway keystore + VERSION_NAME=1.2.3 VERSION_CODE=42 -> `app-release.apk`, `apksigner verify --print-certs` rc=0 (CN=test), `aapt2 dump badging` -> versionCode='42' versionName='1.2.3'; assembleDebug + testDebugUnitTest green; workflow YAML parses (ruby YAML).
+Release assets: `softprops/action-gh-release@v2` with `files:` only uploads/replaces same-named assets; zip vs apk names differ, nothing deleted. Race: both jobs may create the release concurrently (known action edge; rerun fixes).
+Not verified: actual CI run (needs tag + secrets), setup-signing.sh executed (only `bash -n`), Obtainium install.
+
+2026-10-11 review fixes: single release upload (apk job -> artifact, release job needs [build, apk] and uploads zip+apk), secrets via env, rm -f, NDK from runner's ANDROID_NDK_LATEST_HOME, ponytail note on VERSION_CODE, gradle signing folded into release buildType, setup-signing.sh var rename + existing-jks password check. Re-verified: unsigned/signed assembleRelease (apksigner rc=0, versionCode 42), assembleDebug+tests, YAML parse, bash -n.

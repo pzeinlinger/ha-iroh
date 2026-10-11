@@ -25,7 +25,7 @@ jobs:
           name: bin-${{ matrix.arch }}
           path: custom_components/ha_iroh/bin/ha-iroh-bridge-${{ matrix.arch }}
   release:
-    needs: build
+    needs: [build, apk]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,8 +34,50 @@ jobs:
           pattern: bin-*
           merge-multiple: true
           path: custom_components/ha_iroh/bin
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
       - run: ARCHES= ./scripts/release-zip.sh
       - run: test "$(unzip -l dist/ha_iroh.zip | grep -cE ' (__init__.py|bin/ha-iroh-bridge-x86_64|bin/ha-iroh-bridge-aarch64)$')" = 3
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/ha_iroh.zip
+          files: |
+            dist/ha_iroh.zip
+            ha-iroh-*.apk
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/bin/cargo-ndk
+            target
+          key: apk-${{ hashFiles('Cargo.lock') }}
+          restore-keys: apk-
+      - run: command -v cargo-ndk || cargo install cargo-ndk
+      - run: |
+          export ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME  # set by the runner image
+          cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build -p ha_iroh_core --release
+          rm -f android/app/src/main/jniLibs/*/libiroh*.so
+      - name: Build signed APK
+        working-directory: android
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PATH: ${{ runner.temp }}/ha-iroh.jks
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.KEY_PASS }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > "$KEYSTORE_PATH"
+          # ponytail: VERSION_CODE=GITHUB_RUN_NUMBER resets if the workflow is renamed/recreated; Android refuses downgrades. Switch to a committed counter if that happens.
+          VERSION_NAME=${GITHUB_REF_NAME#v} VERSION_CODE=$GITHUB_RUN_NUMBER ./gradlew -q assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk "../ha-iroh-${GITHUB_REF_NAME#v}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: ha-iroh-*.apk

@@ -97,3 +97,7 @@ Tests: `python -m venv .venv-ha && .venv-ha/bin/pip install pytest-homeassistant
 Build: `cargo ndk ... -p ha_iroh_core --release` → regenerate bindings → `./gradlew assembleDebug` (see Build above).
 Screens: dashboard (HA frontend via loopback proxy) with server switcher, server list/add/login, entity picker, Device Controls panel (lights), Assist text sheet via QS tile / launcher shortcuts.
 Unit tests: `cd android && ./gradlew testDebugUnitTest`.
+
+Install / update: add `https://github.com/pzeinlinger/ha-iroh` as an app in [Obtainium](https://obtainium.imranr.dev/); it pulls the release-signed `ha-iroh-<version>.apk` (arm64) from GitHub Releases. The first release-signed install needs a previously installed debug build uninstalled first (different signature; you will have to re-pair).
+
+Maintainers: run `scripts/setup-signing.sh` once to create the signing key and GitHub secrets.
