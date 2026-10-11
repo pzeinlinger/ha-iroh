@@ -19,7 +19,7 @@ jobs:
           path: target
           key: bridge-${{ matrix.arch }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: bridge-${{ matrix.arch }}-
-      - run: ARCHES=${{ matrix.arch }} ZIP=0 ./scripts/release-zip.sh
+      - run: ARCHES=${{ matrix.arch }} ZIP=0 ./scripts/release-zip.sh && sudo chown -R "$USER" target  # docker wrote it as root; cache save needs to read+tar it
       - uses: actions/upload-artifact@v4
         with:
           name: bin-${{ matrix.arch }}
