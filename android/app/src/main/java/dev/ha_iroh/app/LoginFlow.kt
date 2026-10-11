@@ -37,7 +37,8 @@ class LoginFlow(private val http: OkHttpClient, private val baseUrl: String = BA
 
     private suspend fun post(path: String, body: JsonObject): FlowResult {
         val req = Request.Builder().url(baseUrl + path).post(body.toString().toRequestBody("application/json".toMediaType())).build()
-        val (status, text) = http.call(req)
+        val (status, bytes) = http.call(req)
+        val text = bytes.decodeToString()
         check(status == 200) { "login_flow failed: $status $text" }
         val o = json.parseToJsonElement(text).jsonObject
         return when (val type = o["type"]?.jsonPrimitive?.content) {

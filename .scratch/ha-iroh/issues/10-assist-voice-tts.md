@@ -6,10 +6,23 @@ Covers: `RECORD_AUDIO` runtime permission, `AudioRecord` 16 kHz mono PCM16 `VOIC
 
 **Blocked by:** 09 (Assist text: QS tile + shortcuts + bottom sheet)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Voice shortcut opens the sheet already recording; audio spoken before connect completes is not lost
-- [ ] VAD end stops streaming automatically; stop button also works
-- [ ] Transcript, reply, and TTS playback all appear for a spoken command
-- [ ] Mic released and tunnel closed when the sheet is dismissed
-- [ ] Unit test for binary frame assembly (handler byte prefix, end-of-stream frame)
+- [x] Voice shortcut opens the sheet already recording; audio spoken before connect completes is not lost
+- [x] VAD end stops streaming automatically; stop button also works
+- [x] Transcript, reply, and TTS playback all appear for a spoken command
+- [x] Mic released and tunnel closed when the sheet is dismissed (device-verify)
+- [x] Unit test for binary frame assembly (handler byte prefix, end-of-stream frame)
+
+## Comments
+
+Implemented; unit-tested (frame assembly + mocked `listen` run). Not verified on device (needs phone + real HA). Verify:
+- Voice shortcut: permission prompt first time, then recording starts; speech before connect is not lost.
+- VAD end stops recording on its own; Stop button also works; mic indicator disappears.
+- Transcript, reply, TTS audio plays (assumed `.mp3` temp file; MediaPlayer sniffs content anyway).
+- Dismiss mid-listen / mid-TTS: mic off, player released, tunnel closed.
+- Conversation id carried across a voice then text turn.
+
+Skipped (YAGNI): TTS on/off setting for text mode, ExoPlayer, custom DataSource, state restore. HaClient.bytes uses blocking execute() (not cancellable mid-download).
+
+- 2026-10-11 device test on user phone + HA (local STT): voice, VAD stop, transcript, reply, TTS all work. Fixed `data: null` on run-end (JsonNull). Done.
