@@ -1,5 +1,8 @@
 <resources>
-    <style name="Theme.Assist" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.App" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>    <style name="Theme.Assist" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowNoTitle">true</item>

@@ -43,3 +43,16 @@ class AssistSession(private val session: Session) {
 
     private fun JsonObject.type() = this["type"]?.jsonPrimitive?.contentOrNull
 }
+
+data class Pipeline(val id: String, val name: String, val preferred: Boolean)
+
+/** Parses an `assist_pipeline/pipeline/list` result message. */
+fun parsePipelines(msg: JsonObject): List<Pipeline> {
+    val r = msg["result"]?.jsonObject ?: return emptyList()
+    val pref = r["preferred_pipeline"]?.jsonPrimitive?.contentOrNull
+    return r["pipelines"]?.jsonArray?.mapNotNull {
+        val o = it.jsonObject
+        val id = o["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+        Pipeline(id, o["name"]?.jsonPrimitive?.contentOrNull ?: id, id == pref)
+    } ?: emptyList()
+}

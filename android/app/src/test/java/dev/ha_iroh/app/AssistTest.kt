@@ -96,4 +96,11 @@ class AssistTest {
         assertEquals("c1", runs[1]["conversation_id"]!!.jsonPrimitive.content)
         c.close()
     }
+
+    @Test fun `parses pipeline list and relay urls`() {
+        val m = json.parseToJsonElement("""{"result":{"preferred_pipeline":"b","pipelines":[{"id":"a","name":"A"},{"id":"b","name":"B"}]}}""").jsonObject
+        assertEquals(listOf(Pipeline("a", "A", false), Pipeline("b", "B", true)), parsePipelines(m))
+        assertEquals(listOf("https://x", "https://y"), parseRelayUrls(" https://x,\n\nhttps://y "))
+        assertTrue(parseRelayUrls(" ,\n").isEmpty())
+    }
 }

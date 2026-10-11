@@ -85,6 +85,9 @@ class ServerStore(private val ctx: Context) {
         if (l.any { it.id == id }) save(l.map { if (it.id == id) f(it) else it })
     }
 
+    /** Exactly one default Assist server. */
+    suspend fun setDefaultAssist(id: String) = locked { save(_servers.value.map { it.copy(isDefaultAssist = it.id == id) }) }
+
     suspend fun remove(id: String) = locked { save(_servers.value.filter { it.id != id }) }
 
     private companion object { val AD = "servers".toByteArray() }

@@ -23,6 +23,9 @@ import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.CancellationException
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -32,6 +35,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import uniffi.ha_iroh_core.BridgeInfo
 import uniffi.ha_iroh_core.LoopbackProxy
+import uniffi.ha_iroh_core.Tunnel
 import java.util.concurrent.atomic.AtomicReference
 
 private const val TAG = "Dashboard"
@@ -50,7 +54,7 @@ window.externalApp = {
 private fun String?.inOrigin(origin: String?) = this != null && origin != null && (this == origin || startsWith("$origin/"))
 
 /** One resume..pause worth of tunnel + proxy. */
-private class Live(val proxy: LoopbackProxy, val client: HaClient) {
+private class Live(val tunnel: Tunnel, val proxy: LoopbackProxy, val client: HaClient) {
     val origin = "http://${proxy.token()}.localhost:${proxy.port()}"
     /** Blocking (uniffi): call off the main thread. */
     fun close() { proxy.stop(); client.close() } // client.close() disconnects the tunnel
@@ -59,7 +63,7 @@ private class Live(val proxy: LoopbackProxy, val client: HaClient) {
 /** Main screen: the HA frontend of [serverId] through the loopback proxy (SPEC §8.6). */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () -> Unit, modifier: Modifier = Modifier) {
+fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () -> Unit, onInfo: (String?) -> Unit = {}, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
@@ -164,6 +168,13 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
 
     BackHandler(canBack) { web.goBack() }
 
+    LaunchedEffect(serverId) { // iroh path info (relay/direct, rtt) for the bar, polled while connected
+        while (true) {
+            onInfo(withContext(Dispatchers.IO) { state.live.get()?.tunnel?.let { runCatching { it.connInfo() }.getOrNull() } })
+            kotlinx.coroutines.delay(2_000)
+        }
+    }
+
     DisposableEffect(owner, serverId) {
         fun pause() {
             state.job?.cancel()
@@ -185,7 +196,7 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
                             val token = s.refreshToken ?: throw ReloginRequired()
                             val tunnel = app.core().connect(BridgeInfo(s.bridgeInfoName, s.bridgeInfoJson))
                             try {
-                                state.live.set(Live(tunnel.startLoopbackProxy(), HaClient(tunnel.okHttpClient(), BASE_URL, token, tunnel::disconnect)))
+                                state.live.set(Live(tunnel, tunnel.startLoopbackProxy(), HaClient(tunnel.okHttpClient(), BASE_URL, token, tunnel::disconnect)))
                             } catch (t: Throwable) { tunnel.disconnect(); throw t }
                         }
                     } catch (e: CancellationException) { throw e
@@ -229,11 +240,16 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
 
 /** Top bar: server switcher + gear to the server list. */
 @Composable
-fun DashboardBar(servers: List<Server>, activeId: String, onPick: (Server) -> Unit, onSettings: () -> Unit) {
+fun DashboardBar(servers: List<Server>, activeId: String, info: String?, onPick: (Server) -> Unit, onSettings: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         Box(Modifier.weight(1f)) {
-            TextButton({ open = true }) { Text((servers.firstOrNull { it.id == activeId }?.name ?: "?") + " ▾") }
+            TextButton({ open = true }) {
+                Column {
+                    Text((servers.firstOrNull { it.id == activeId }?.name ?: "?") + " ▾")
+                    Text(info ?: "connecting…", style = MaterialTheme.typography.labelSmall)
+                }
+            }
             DropdownMenu(open, { open = false }) {
                 servers.forEach { s -> DropdownMenuItem({ Text(s.name) }, { open = false; onPick(s) }) }
             }

@@ -12,8 +12,17 @@ class App : Application() {
     @Volatile private var _core: Core? = null
 
     @Synchronized
-    fun core(): Core = _core ?: Core(filesDir.path, RelayConfig.N0).also { _core = it }
+    fun core(): Core = _core ?: Core(filesDir.path, relay()).also { _core = it }
 
+    val prefs by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
+
+    /** Relay override (plain prefs, not secret); read when [core] is constructed, so it applies on next app start. */
+    private fun relay(): RelayConfig = parseRelayUrls(prefs.getString("relay_urls", "").orEmpty()).let { if (it.isEmpty()) RelayConfig.N0 else RelayConfig.Custom(it) }
+
+    /** Wipes the app key (even if no Core exists yet) and drops the Core. Call from IO. */
     @Synchronized
-    fun resetCore() { _core = null }
+    fun wipeCore() { (_core ?: Core(filesDir.path, relay())).wipeKey(); _core = null }
 }
+
+/** Comma/newline separated URLs; blank entries dropped. */
+fun parseRelayUrls(s: String): List<String> = s.split(',', '\n').map { it.trim() }.filter { it.isNotEmpty() }

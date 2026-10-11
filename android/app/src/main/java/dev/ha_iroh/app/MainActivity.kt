@@ -19,9 +19,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -33,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import uniffi.ha_iroh_core.BridgeInfo
@@ -55,10 +59,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val app = application as App
+        // Android 16+ local network protection: without this runtime grant, iroh's LAN holepunch UDP is silently dropped (relay only).
+        if (android.os.Build.VERSION.SDK_INT >= 36 && checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+            requestPermissions(arrayOf(Manifest.permission.ACCESS_LOCAL_NETWORK), 0)
         // debug-only: adb ... --es ticket <uri> opens Add with the URI prefilled
         val ticket = intent.getStringExtra("ticket")
         setContent {
-            MaterialTheme {
+            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
                 val servers by app.store.servers.collectAsState()
                 var loaded by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { app.store.init(); loaded = true }
@@ -70,13 +77,14 @@ class MainActivity : ComponentActivity() {
                 val cur = screen ?: if (loaded) home else return@MaterialTheme
                 if (cur is Screen.Dashboard) {
                     LaunchedEffect(cur.id) { active = cur.id }
-                    Column(Modifier.fillMaxSize().padding(top = 80.dp).navigationBarsPadding()) {
-                        DashboardBar(servers, cur.id, { screen = if (it.refreshToken != null) Screen.Dashboard(it.id) else Screen.Detail(it.id) }, { screen = Screen.List })
-                        key(cur.id) { Dashboard(app, cur.id, { screen = Screen.List }, { screen = Screen.Detail(cur.id) }, Modifier.weight(1f)) }
+                    var info by remember { mutableStateOf<String?>(null) }
+                    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+                        DashboardBar(servers, cur.id, info, { screen = if (it.refreshToken != null) Screen.Dashboard(it.id) else Screen.Detail(it.id) }, { screen = Screen.List })
+                        key(cur.id) { Dashboard(app, cur.id, { screen = Screen.List }, { screen = Screen.Detail(cur.id) }, { info = it }, Modifier.weight(1f)) }
                     }
                     return@MaterialTheme
                 }
-                Column(Modifier.fillMaxSize().padding(16.dp).padding(top = 48.dp)) {
+                Column(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp)) {
                     when (val s = cur) {
                         Screen.List -> ServerList(app, home, { screen = Screen.Add() }, { screen = Screen.Detail(it) }, { screen = it })
                         is Screen.Add -> AddServer(app, s.uri, { screen = Screen.List }) { screen = it }
@@ -104,7 +112,7 @@ private fun ServerList(app: App, home: Screen, onAdd: () -> Unit, onOpen: (Strin
     BackHandler(home != Screen.List) { onNavigate(home) }
     val servers by app.store.servers.collectAsState()
     Box(Modifier.fillMaxSize()) {
-        Column {
+        Column(Modifier.verticalScroll(rememberScrollState())) {
             Text("Servers", style = MaterialTheme.typography.headlineSmall)
             servers.forEach {
                 ListItem(
@@ -113,9 +121,42 @@ private fun ServerList(app: App, home: Screen, onAdd: () -> Unit, onOpen: (Strin
                     modifier = Modifier.clickable { onOpen(it.id) },
                 )
             }
+            AppSettings(app)
+            Spacer(Modifier.height(80.dp)) // clear of the FAB
         }
         ExtendedFloatingActionButton(onClick = onAdd, modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd)) { Text("Add server") }
     }
+}
+
+@Composable
+private fun AppSettings(app: App) {
+    val clipboard = LocalClipboardManager.current
+    var endpointId by remember { mutableStateOf("...") }
+    LaunchedEffect(Unit) { endpointId = withContext(Dispatchers.IO) { runCatching { app.core().endpointId() }.getOrElse { "error: $it" } } }
+    var custom by remember { mutableStateOf(app.prefs.getString("relay_urls", "").orEmpty().isNotEmpty()) }
+    var urls by remember { mutableStateOf(app.prefs.getString("relay_urls", "").orEmpty()) }
+    var invalid by remember { mutableStateOf(false) }
+    fun save(text: String) {
+        val all = parseRelayUrls(text)
+        val ok = all.filter { it.toHttpUrlOrNull() != null }
+        invalid = ok.size != all.size
+        app.prefs.edit().putString("relay_urls", ok.joinToString("\n")).apply()
+    }
+    Text("App settings", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 16.dp))
+    Text("EndpointId", style = MaterialTheme.typography.labelMedium)
+    Text(endpointId, style = MaterialTheme.typography.bodySmall)
+    Button({ clipboard.setText(AnnotatedString(endpointId)) }) { Text("Copy EndpointId") }
+    Text("Relay", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 8.dp))
+    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        RadioButton(!custom, { custom = false; app.prefs.edit().remove("relay_urls").apply() }); Text("n0 (default)")
+        RadioButton(custom, { custom = true; save(urls) }); Text("custom")
+    }
+    if (custom) OutlinedTextField(urls, {
+        urls = it
+        save(it)
+    }, label = { Text("relay URLs (comma or newline separated)") })
+    if (invalid) Text("invalid URL (not saved)", color = MaterialTheme.colorScheme.error)
+    Text("takes effect after app restart", style = MaterialTheme.typography.labelSmall)
 }
 
 @Composable
@@ -228,18 +269,19 @@ private fun Detail(app: App, id: String, onBack: () -> Unit, onNavigate: (Screen
     val server = app.store.servers.collectAsState().value.firstOrNull { it.id == id } ?: return
     var out by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var pipelines by remember { mutableStateOf<List<Pipeline>?>(null) }
     fun run(f: suspend (HaClient) -> String) = scope.launch {
         busy = true
         out = "..."
         out = try {
             f(app.manager.client(server))
         } catch (e: ReloginRequired) {
-            app.store.upsert(server.copy(refreshToken = null))
+            app.store.update(id) { it.copy(refreshToken = null) }
             "re-login required"
         } catch (e: Throwable) {
             "error: $e"
         } finally {
-            withContext(Dispatchers.IO) { app.manager.release(id) }
+            withContext(NonCancellable + Dispatchers.IO) { app.manager.release(id) }
             busy = false
         }
     }
@@ -247,6 +289,13 @@ private fun Detail(app: App, id: String, onBack: () -> Unit, onNavigate: (Screen
     Column(Modifier.verticalScroll(rememberScrollState())) {
         Text(server.name, style = MaterialTheme.typography.headlineSmall)
         Text("id ${server.id}")
+        var name by remember(server.name) { mutableStateOf(server.name) }
+        OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true)
+        Button(enabled = !busy && name.isNotBlank() && name.trim() != server.name, onClick = { scope.launch { app.store.update(id) { it.copy(name = name.trim()) } } }) { Text("Rename") }
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Switch(server.isDefaultAssist, { if (it) scope.launch { app.store.setDefaultAssist(id) } else scope.launch { app.store.update(id) { s -> s.copy(isDefaultAssist = false) } } })
+            Text(" Default for Assist")
+        }
         if (server.refreshToken == null) {
             Button(enabled = !busy, onClick = {
                 scope.launch {
@@ -258,15 +307,33 @@ private fun Detail(app: App, id: String, onBack: () -> Unit, onNavigate: (Screen
             Button(enabled = !busy, onClick = { run { it.connect().close(); "auth_ok" } }) { Text("Connect (WS auth)") }
             Button(enabled = !busy, onClick = { run { it.get("/api/") } }) { Text("GET /api/") }
             Button(enabled = !busy, onClick = { onNavigate(Screen.Entities(id)) }) { Text("Entities") }
+            Button(enabled = !busy, onClick = { scope.launch { app.store.update(id) { it.copy(refreshToken = null) } } }) { Text("Log out") }
+            Text("Pipeline: ${pipelines?.firstOrNull { it.id == server.pipelineId }?.name ?: server.pipelineId ?: "HA preferred"}")
+            Button(enabled = !busy, onClick = {
+                run { c ->
+                    pipelines = parsePipelines(c.connect().sendCommand(buildJsonObject { put("type", "assist_pipeline/pipeline/list") }))
+                    ""
+                }
+            }) { Text("Pipeline") }
+            pipelines?.let { list ->
+                fun pick(pid: String?) = scope.launch { app.store.update(id) { it.copy(pipelineId = pid) }; pipelines = null }
+                TextButton({ pick(null) }) { Text("HA preferred" + if (server.pipelineId == null) " (selected)" else "") }
+                list.forEach { TextButton({ pick(it.id) }) { Text(it.name + (if (it.preferred) " (HA preferred)" else "") + if (it.id == server.pipelineId) " (selected)" else "") } }
+            }
         }
         Button(enabled = !busy, onClick = {
             scope.launch {
-                withContext(Dispatchers.IO) { app.manager.release(id) }
-                app.store.remove(id)
-                withContext(Dispatchers.IO) { File(app.filesDir, "entities-$id.json").delete() }
+                withContext(NonCancellable + Dispatchers.IO) {
+                    app.manager.release(id)
+                    app.store.remove(id)
+                    File(app.filesDir, "entities-$id.json").delete()
+                    app.areaFile(id).delete()
+                    // Decision: the app key (EndpointId) is wiped only with the last server, so other servers stay paired.
+                    if (app.store.servers.value.isEmpty()) app.wipeCore()
+                }
                 onBack()
             }
-        }) { Text("Remove server") }
+        }) { Text("Unpair") }
         Text(out)
     }
 }
