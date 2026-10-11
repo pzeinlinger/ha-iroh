@@ -47,6 +47,11 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -151,12 +156,38 @@ private fun SettingsScreen(app: App, home: Screen, onAdd: () -> Unit, onOpen: (S
                     Button(onAdd, Modifier.padding(top = 16.dp)) { Text("Add server") }
                 }
             } else {
-                servers.forEach {
+                // Drag the handle to reorder; local copy during the drag, persisted on release.
+                var order by remember(servers) { mutableStateOf(servers) }
+                var dragging by remember { mutableStateOf<String?>(null) }
+                var dragY by remember { mutableFloatStateOf(0f) }
+                val heights = remember { mutableStateMapOf<String, Int>() }
+                order.forEach { s ->
                     ListItem(
-                        headlineContent = { Text(it.name) },
-                        supportingContent = { Text(if (it.refreshToken == null) "Login required" else "Logged in") },
+                        headlineContent = { Text(s.name) },
+                        supportingContent = { Text(if (s.refreshToken == null) "Login required" else "Logged in") },
+                        leadingContent = {
+                            if (servers.size > 1) Icon(Icons.Filled.Menu, "Reorder", Modifier.pointerInput(s.id) {
+                                detectDragGestures(
+                                    onDragStart = { dragging = s.id; dragY = 0f },
+                                    onDragEnd = { dragging = null; scope.launch { app.store.reorder(order.map { it.id }) } },
+                                    onDragCancel = { dragging = null; order = servers },
+                                ) { change, d ->
+                                    change.consume()
+                                    dragY += d.y
+                                    val i = order.indexOfFirst { it.id == s.id }
+                                    val next = order.getOrNull(i + 1)?.let { heights[it.id] } ?: Int.MAX_VALUE
+                                    val prev = order.getOrNull(i - 1)?.let { heights[it.id] } ?: Int.MAX_VALUE
+                                    if (dragY > next / 2f) { order = order.swap(i, i + 1); dragY -= next }
+                                    else if (dragY < -prev / 2f) { order = order.swap(i, i - 1); dragY += prev }
+                                }
+                            })
+                        },
                         trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
-                        modifier = Modifier.clickable { onOpen(it.id) },
+                        modifier = Modifier
+                            .zIndex(if (s.id == dragging) 1f else 0f)
+                            .graphicsLayer { translationY = if (s.id == dragging) dragY else 0f }
+                            .onSizeChanged { heights[s.id] = it.height }
+                            .clickable { onOpen(s.id) },
                     )
                 }
                 ListItem({ Text("Add server") }, Modifier.clickable(onClick = onAdd), leadingContent = { Icon(Icons.Filled.Add, null) })
@@ -544,3 +575,5 @@ private fun EntityPicker(app: App, id: String, onBack: () -> Unit) {
         }
     }
 }
+
+private fun <T> List<T>.swap(i: Int, j: Int) = toMutableList().also { it[i] = it[j].also { _ -> it[j] = this[i] } }
