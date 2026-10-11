@@ -12,6 +12,7 @@ Home Assistant access over iroh. See `SPEC.md`.
 Notes:
 - Android 16+: the app asks for the "local network" permission. Allow it, otherwise LAN direct connections fail.
 - `ip_ban`: the bridge connects to HA from 127.0.0.1, so failed phone logins count against localhost. With `http: ip_ban_enabled: true`, a few bad logins can lock out every device. Keep `login_attempts_threshold` high or leave `ip_ban_enabled` off (SPEC §11 risk 1).
+- `trusted_networks`: for the same reason, never list `127.0.0.1` / `::1` in the `trusted_networks` auth provider. Every paired phone would log in as any user without a password.
 - Standalone bridge (no HACS, e.g. HA on another host): see [Bridge](#bridge) below.
 
 ## One-time setup
