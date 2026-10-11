@@ -110,6 +110,11 @@ impl Core {
         self.ep.id().to_string()
     }
 
+    /// Hint that the OS network changed (Android gives native code no netlink); iroh re-probes and rebinds.
+    pub fn network_change(&self) {
+        RT.block_on(self.ep.network_change());
+    }
+
     /// Unpair: delete the persisted key and close the endpoint. Discard this `Core` afterwards.
     pub fn wipe_key(&self) {
         let _ = std::fs::remove_file(&self.key_path);

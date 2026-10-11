@@ -679,6 +679,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_ha_iroh_core_checksum_method_core_endpoint_id(
     ): Int
+    external fun uniffi_ha_iroh_core_checksum_method_core_network_change(
+    ): Int
     external fun uniffi_ha_iroh_core_checksum_method_core_pair(
     ): Int
     external fun uniffi_ha_iroh_core_checksum_method_core_wipe_key(
@@ -737,6 +739,8 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_ha_iroh_core_fn_method_core_endpoint_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_ha_iroh_core_fn_method_core_network_change(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_ha_iroh_core_fn_method_core_pair(`ptr`: Long,`ticketUri`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_ha_iroh_core_fn_method_core_wipe_key(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -898,6 +902,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_ha_iroh_core_checksum_method_core_endpoint_id() and 0xFFFF) != 11652) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_ha_iroh_core_checksum_method_core_network_change() and 0xFFFF) != 2537) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_ha_iroh_core_checksum_method_core_pair() and 0xFFFF) != 52116) {
@@ -1327,6 +1334,11 @@ public interface CoreInterface {
     
     fun `endpointId`(): kotlin.String
     
+    /**
+     * Hint that the OS network changed (Android gives native code no netlink); iroh re-probes and rebinds.
+     */
+    fun `networkChange`()
+    
     fun `pair`(`ticketUri`: kotlin.String, `deviceName`: kotlin.String): BridgeInfo
     
     /**
@@ -1477,6 +1489,21 @@ open class Core: Disposable, AutoCloseable, CoreInterface
     }
     )
     }
+    
+
+    
+    /**
+     * Hint that the OS network changed (Android gives native code no netlink); iroh re-probes and rebinds.
+     */override fun `networkChange`()
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_ha_iroh_core_fn_method_core_network_change(
+        it,
+        _status)
+}
+    }
+    
     
 
     
