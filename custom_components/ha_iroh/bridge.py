@@ -8,15 +8,17 @@ from collections.abc import Callable
 import json
 import logging
 import os
+from pathlib import Path
+import platform
 import shutil
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_RELAY, DEFAULTS
+from .const import CONF_BIND_PORT, CONF_RELAY, DEFAULTS
 
-# ponytail: switch to requirements=["ha-iroh-bridge==x"] once ticket 14 publishes the wheel
+ARCHES = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,18 +59,36 @@ class BridgeProcess:
             "allowlist_path": f"{d}/allowlist.toml",
             "relay": relay,
             "name": s[CONF_NAME],
+            "bind_port": s[CONF_BIND_PORT],
         }
         os.makedirs(d, exist_ok=True)
         with open(path, "w") as f:
             f.write("".join(f"{k} = {json.dumps(v, ensure_ascii=False)}\n" for k, v in lines.items()))
         return path
 
+    def _find_binary(self) -> str:
+        # PATH wins (dev override); else the binary bundled in the HACS zip, copied
+        # to <config> because the unzip loses the exec bit.
+        if found := shutil.which("ha-iroh-bridge"):
+            return found
+        machine = platform.machine().lower()
+        arch = ARCHES.get(machine)
+        src = Path(__file__).parent / "bin" / f"ha-iroh-bridge-{arch}"
+        if not arch or not src.is_file():
+            raise FileNotFoundError(f"no bundled ha-iroh-bridge for architecture {machine!r}")
+        dst = Path(self.hass.config.path("ha_iroh", "bin", "ha-iroh-bridge"))
+        a, b = src.stat(), dst.stat() if dst.exists() else None
+        if not b or (a.st_size, a.st_mtime) != (b.st_size, b.st_mtime):
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dst.with_suffix(".tmp")  # replace, not overwrite: an orphan bridge may still run dst (ETXTBSY)
+            shutil.copy2(src, tmp)  # copy2 keeps mtime for the comparison above
+            tmp.chmod(0o755)
+            os.replace(tmp, dst)
+        return str(dst)
+
     async def start(self) -> None:
-        binary = shutil.which("ha-iroh-bridge")
-        if not binary:
-            raise FileNotFoundError("ha-iroh-bridge binary not found")
+        self._binary = await self.hass.async_add_executor_job(self._find_binary)
         self._config = await self.hass.async_add_executor_job(self._write_config)
-        self._binary = binary
         self._stopping.clear()
         self.ready.clear()
         self._task = self.entry.async_create_background_task(

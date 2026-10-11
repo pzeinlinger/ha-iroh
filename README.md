@@ -2,6 +2,18 @@
 
 Home Assistant access over iroh. See `SPEC.md`.
 
+## Install (HACS)
+
+1. HACS → ⋮ → Custom repositories → add `https://github.com/pzeinlinger/ha-iroh`, category Integration. Install "HA iroh" and restart Home Assistant. The release zip bundles the bridge binary (x86_64 and aarch64).
+2. Settings → Devices & services → Add integration → "HA iroh". Assumes HA listens on 127.0.0.1 (`http.server_host` set to a non-loopback IP is not supported).
+3. Configure → Settings: bridge name, relay (`n0` or comma-separated relay URLs), and "Bridge UDP port". Set it to a fixed UDP port and forward it on your router to HA for a direct path from outside the LAN; `0` picks a random port.
+4. Pair a phone: Configure → "Add device" shows a QR code; scan it in the app. Deleting the device in HA revokes it.
+
+Notes:
+- Android 16+: the app asks for the "local network" permission. Allow it, otherwise LAN direct connections fail.
+- `ip_ban`: the bridge connects to HA from 127.0.0.1, so failed phone logins count against localhost. With `http: ip_ban_enabled: true`, a few bad logins can lock out every device. Keep `login_attempts_threshold` high or leave `ip_ban_enabled` off (SPEC §11 risk 1).
+- Standalone bridge (no HACS, e.g. HA on another host): see [Bridge](#bridge) below.
+
 ## One-time setup
 
 1. Install [Nix](https://nixos.org/download), [devenv](https://devenv.sh) and direnv.
@@ -42,6 +54,7 @@ secret_key_path = "ha-iroh-bridge.key"   # generated 0600 on first run
 allowlist_path = "allowlist.toml"
 relay = "n0"                             # or ["https://relay.example/"]
 name = "Home Assistant"
+bind_port = 0                            # fixed UDP port for a router port forward; 0 = random
 pair_ttl = 600                           # pairing code lifetime, seconds
 ```
 
@@ -75,9 +88,7 @@ cargo run -p ha_iroh_core --example cli -- curl /api/ --bridge <bridge EndpointI
 
 Runs the bridge as a subprocess inside Home Assistant and manages paired phones as devices.
 
-1. Put a `ha-iroh-bridge` binary on the container's PATH (ticket 14 will ship it as a PyPI wheel; until then build it with `rust:alpine` and mount it at `/usr/local/bin/ha-iroh-bridge`).
-2. Copy `custom_components/ha_iroh` into `<config>/custom_components/` (or add this repo in HACS), restart HA.
-3. Settings → Integrations → Add "HA iroh". Then Configure → "Pair device" shows the QR to scan with the app. Deleting the device in HA revokes it.
+Installed via HACS (see above). For a manual install copy `custom_components/ha_iroh` into `<config>/custom_components/` and run `scripts/release-zip.sh` to build the bundled binaries, or put a `ha-iroh-bridge` on PATH (it wins over the bundled one).
 
 Tests: `python -m venv .venv-ha && .venv-ha/bin/pip install pytest-homeassistant-custom-component && .venv-ha/bin/pytest tests`.
 

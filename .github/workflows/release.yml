@@ -1,0 +1,24 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: actions/cache@v4
+        with:
+          path: target
+          key: bridge-${{ hashFiles('Cargo.lock') }}
+          restore-keys: bridge-
+      - run: ./scripts/release-zip.sh
+      - run: test "$(unzip -l dist/ha_iroh.zip | grep -cE ' (__init__.py|bin/ha-iroh-bridge-x86_64|bin/ha-iroh-bridge-aarch64)$')" = 3
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ha_iroh.zip
