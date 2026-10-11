@@ -26,6 +26,9 @@ pub struct Config {
     pub name: String,
     /// Pairing code lifetime in seconds.
     pub pair_ttl: u64,
+    /// Fixed UDP port for the iroh socket (0 = random). Set it and open it in the firewall so phones can
+    /// holepunch a direct path; with a random port behind a stateful firewall direct paths are flaky.
+    pub bind_port: u16,
 }
 
 impl Default for Config {
@@ -37,6 +40,7 @@ impl Default for Config {
             relay: RelayConfig::default(),
             name: "Home Assistant".into(),
             pair_ttl: 600,
+            bind_port: 0,
         }
     }
 }

@@ -691,6 +691,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_ha_iroh_core_checksum_method_stream_write(
     ): Int
+    external fun uniffi_ha_iroh_core_checksum_method_tunnel_conn_info(
+    ): Int
     external fun uniffi_ha_iroh_core_checksum_method_tunnel_disconnect(
     ): Int
     external fun uniffi_ha_iroh_core_checksum_method_tunnel_open_stream(
@@ -755,6 +757,8 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_ha_iroh_core_fn_free_tunnel(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    external fun uniffi_ha_iroh_core_fn_method_tunnel_conn_info(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_ha_iroh_core_fn_method_tunnel_disconnect(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_ha_iroh_core_fn_method_tunnel_open_stream(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -912,6 +916,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_ha_iroh_core_checksum_method_stream_write() and 0xFFFF) != 17048) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_ha_iroh_core_checksum_method_tunnel_conn_info() and 0xFFFF) != 62157) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_ha_iroh_core_checksum_method_tunnel_disconnect() and 0xFFFF) != 27157) {
@@ -2244,6 +2251,11 @@ public object FfiConverterTypeStream: FfiConverter<Stream, Long> {
 
 public interface TunnelInterface {
     
+    /**
+     * Human-readable snapshot of the selected network path, e.g. `direct 192.168.1.5:4433 12ms (+1 path)`.
+     */
+    fun `connInfo`(): kotlin.String
+    
     fun `disconnect`()
     
     fun `openStream`(): Stream
@@ -2353,6 +2365,22 @@ open class Tunnel: Disposable, AutoCloseable, TunnelInterface
             UniffiLib.uniffi_ha_iroh_core_fn_clone_tunnel(handle, status)
         }
     }
+
+    
+    /**
+     * Human-readable snapshot of the selected network path, e.g. `direct 192.168.1.5:4433 12ms (+1 path)`.
+     */override fun `connInfo`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_ha_iroh_core_fn_method_tunnel_conn_info(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
 
     override fun `disconnect`()
         = 

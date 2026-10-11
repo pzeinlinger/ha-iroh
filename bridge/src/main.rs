@@ -44,6 +44,9 @@ async fn main() -> anyhow::Result<()> {
     if let Some(m) = cfg.relay.relay_mode()? {
         b = b.relay_mode(m);
     }
+    if cfg.bind_port != 0 {
+        b = b.clear_ip_transports().bind_addr(format!("0.0.0.0:{}", cfg.bind_port))?.bind_addr(format!("[::]:{}", cfg.bind_port))?;
+    }
     let ep = b.bind().await?;
     tracing::info!(name = cfg.name, ha_addr = cfg.ha_addr, "bridge running");
     let (bridge, mut events) = Bridge::new(cfg, ep.clone())?;
@@ -68,8 +71,9 @@ async fn main() -> anyhow::Result<()> {
             _ = term.recv() => break,
         }
     }
-    ep.close().await;
-    Ok(())
+    let _ = tokio::time::timeout(Duration::from_secs(3), ep.close()).await;
+    // The blocking stdin reader thread never returns, and the runtime would wait for it on drop.
+    std::process::exit(0)
 }
 
 async fn command(bridge: &Bridge, ep: &Endpoint, line: &str) -> Value {
