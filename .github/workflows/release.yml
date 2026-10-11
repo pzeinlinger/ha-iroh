@@ -1,6 +1,7 @@
 name: release
 on:
   push:
+    branches: [main]  # warms the cache: tag runs can only read caches saved on their own ref or the default branch
     tags: ['v*']
 permissions:
   contents: write
@@ -25,6 +26,7 @@ jobs:
           name: bin-${{ matrix.arch }}
           path: custom_components/ha_iroh/bin/ha-iroh-bridge-${{ matrix.arch }}
   release:
+    if: startsWith(github.ref, 'refs/tags/')
     needs: [build, apk]
     runs-on: ubuntu-latest
     steps:
