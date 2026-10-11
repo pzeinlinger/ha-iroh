@@ -39,3 +39,4 @@ User steps:
 5. Tick the remaining two boxes (CI zip upload, in-HA bundled-binary start) once confirmed.
 
 Review fixes applied: atomic binary replace, recopy tests, layout check in CI, no `workflow_dispatch`, README/SPEC wording. Checkbox 3 stays open: in-container only ran `--help`; `BridgeProcess.start()` was not run against the real binary in HA.
+Switched release workflow from QEMU to native per-arch runners (build matrix + release job zips artifacts); script gained ZIP=0 and empty ARCHES.
