@@ -29,6 +29,7 @@ import okhttp3.Response
 import java.io.IOException
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString.Companion.toByteString
 
 // Official app's values; see SPEC §11 risk 2 for the decision record.
 const val CLIENT_ID = "https://home-assistant.io/android"
@@ -38,14 +39,14 @@ private const val TIMEOUT_MS = 15_000L
 
 internal val json = Json { ignoreUnknownKeys = true }
 
-/** Async OkHttp call that cancels with the coroutine; returns (status, body). */
-internal suspend fun OkHttpClient.call(req: Request): Pair<Int, String> = suspendCancellableCoroutine { c ->
+/** Async OkHttp call that cancels with the coroutine; returns (status, body bytes). */
+internal suspend fun OkHttpClient.call(req: Request): Pair<Int, ByteArray> = suspendCancellableCoroutine { c ->
     val call = newCall(req)
     c.invokeOnCancellation { call.cancel() }
     call.enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) = c.resumeWithException(e)
         override fun onResponse(call: Call, response: Response) =
-            c.resumeWith(runCatching { response.use { it.code to it.body.string() } })
+            c.resumeWith(runCatching { response.use { it.code to it.body.bytes() } })
     })
 }
 
@@ -55,7 +56,7 @@ class TokenError(val status: Int, val error: String?) : Exception("token endpoin
 internal suspend fun OkHttpClient.token(baseUrl: String, vararg fields: Pair<String, String>): JsonObject {
     val form = FormBody.Builder().apply { fields.forEach { add(it.first, it.second) } }.add("client_id", CLIENT_ID).build()
     val (status, body) = call(Request.Builder().url("$baseUrl/auth/token").post(form).build())
-    val o = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull()
+    val o = runCatching { json.parseToJsonElement(body.decodeToString()).jsonObject }.getOrNull()
     if (status != 200) throw TokenError(status, o?.get("error")?.jsonPrimitive?.contentOrNull)
     return o ?: throw TokenError(status, "bad_json")
 }
@@ -110,6 +111,9 @@ class Session internal constructor(private val ws: WebSocket, inbox: ReceiveChan
     /** Sends a command and returns its `result` message; throws [HaError] on success=false. */
     suspend fun sendCommand(cmd: JsonObject): JsonObject = request(cmd, nextId.getAndIncrement())
 
+    /** Binary WS frame (Assist STT audio). */
+    fun sendBinary(bytes: ByteArray) { if (!ws.send(bytes.toByteString())) throw IOException("websocket send failed") }
+
     /** Emits each `event` payload of the subscription; unsubscribes on cancel. */
     fun subscribe(cmd: JsonObject): Flow<JsonObject> = callbackFlow {
         val id = nextId.getAndIncrement()
@@ -162,7 +166,15 @@ class HaClient(
         val token = refresh()
         val (status, body) = http.call(Request.Builder().url(baseUrl + path).header("Authorization", "Bearer $token").build())
         if (status == 401) throw ReloginRequired()
-        return "$status\n$body"
+        return "$status\n${body.decodeToString()}"
+    }
+
+    /** GET [path] over the tunnel as raw bytes (TTS audio). */
+    suspend fun bytes(path: String): ByteArray {
+        val (status, body) = http.call(Request.Builder().url(baseUrl + path).header("Authorization", "Bearer ${refresh()}").build())
+        if (status == 401) throw ReloginRequired()
+        if (status != 200) throw IOException("HTTP $status")
+        return body
     }
 
     suspend fun connect(): Session {
