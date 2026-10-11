@@ -42,10 +42,12 @@ import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.graphics.graphicsLayer
@@ -68,6 +70,8 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+
+private const val COFFEE_URL = "https://buymeacoffee.com/pzeinlinger"
 
 private sealed interface Screen {
     data object Settings : Screen
@@ -113,6 +117,7 @@ class MainActivity : ComponentActivity() {
                     launched = null
                 }
                 val cur = screen ?: if (loaded) home else return@AppTheme
+                CoffeePrompt(app, loggedIn.isNotEmpty())
                 when (val s = cur) {
                     is Screen.Dashboard -> {
                         LaunchedEffect(s.id) { active = s.id }
@@ -146,6 +151,7 @@ private fun SettingsScreen(app: App, home: Screen, onAdd: () -> Unit, onOpen: (S
     LaunchedEffect(Unit) { endpointId = withContext(Dispatchers.IO) { runCatching { app.core().endpointId() }.getOrElse { "Error: ${it.userMessage()}" } } }
     var relay by remember { mutableStateOf(app.prefs.getString("relay_urls", "").orEmpty()) }
     var relayDialog by remember { mutableStateOf(false) }
+    val uri = LocalUriHandler.current
 
     Scaffold(topBar = { TopAppBar({ Text("Settings") }, navigationIcon = { if (home != Screen.Settings) BackArrow() }) }, snackbarHost = { SnackbarHost(snack) }) { pad ->
         Column(Modifier.padding(pad).verticalScroll(rememberScrollState())) {
@@ -204,6 +210,18 @@ private fun SettingsScreen(app: App, home: Screen, onAdd: () -> Unit, onOpen: (S
                 Modifier.clickable { relayDialog = true },
                 supportingContent = { Text(if (relay.isEmpty()) "Default (n0)" else relay.replace("\n", ", ")) },
             )
+            Section("Support")
+            ListItem(
+                { Text("Buy me a coffee") },
+                Modifier.clickable { uri.openUri(COFFEE_URL) },
+                supportingContent = { Text("ha-iroh is a one-person project, free and without ads. A coffee keeps it going.") },
+                leadingContent = { Icon(Icons.Filled.Favorite, null) },
+            )
+            ListItem(
+                { Text("Source code & issues") },
+                Modifier.clickable { uri.openUri("https://github.com/pzeinlinger/ha-iroh") },
+                supportingContent = { Text("github.com/pzeinlinger/ha-iroh") },
+            )
         }
     }
     if (relayDialog) RelayDialog(relay, { relay = it; app.prefs.edit().putString("relay_urls", it).apply(); relayDialog = false }) { relayDialog = false }
@@ -237,6 +255,28 @@ private fun RelayDialog(initial: String, onSave: (String) -> Unit, onDismiss: ()
 }
 
 private enum class AddMode { Scan, Paste, Connecting, Failed }
+
+/** One-time "buy me a coffee" dialog, a few seconds after the first server is paired and logged in (the login itself went through the tunnel). Never shown again, whatever the user taps. */
+@Composable
+private fun CoffeePrompt(app: App, connected: Boolean) {
+    var show by remember { mutableStateOf(false) }
+    val uri = LocalUriHandler.current
+    LaunchedEffect(connected) {
+        if (!connected || app.prefs.getBoolean("coffee_shown", false)) return@LaunchedEffect
+        kotlinx.coroutines.delay(5_000)
+        show = true
+    }
+    if (!show) return
+    fun done() { app.prefs.edit().putBoolean("coffee_shown", true).apply(); show = false }
+    AlertDialog(
+        onDismissRequest = ::done,
+        icon = { Text("\u2615", fontSize = 40.sp) },
+        title = { Text("You're all set!") },
+        text = { Text("ha-iroh is a one-person weekend project, free and without ads. If it saves you a minute in front of the garage door, a coffee is very welcome.") },
+        confirmButton = { TextButton({ done(); uri.openUri(COFFEE_URL) }) { Text("Buy me a coffee") } },
+        dismissButton = { TextButton(::done) { Text("Maybe later") } },
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
