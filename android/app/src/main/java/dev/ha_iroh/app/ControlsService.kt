@@ -40,8 +40,6 @@ import java.util.function.Consumer
 
 fun Context.entityCache(serverId: String) = EntityCache(File(filesDir, "entities-$serverId.json"))
 
-private fun EntityState.title() = (attributes["friendly_name"] as? JsonPrimitive)?.contentOrNull ?: entityId
-
 fun Context.areaFile(serverId: String) = File(filesDir, "areas-$serverId.json")
 
 private fun Spec.Range.template(id: String) = RangeTemplate(id, min, max, value.coerceIn(min, max), step, "%.0f%%")
@@ -64,11 +62,10 @@ fun EntityState.toControl(serverId: String, serverName: String, pi: PendingInten
             RangeTemplate(entityId, spec.min, spec.max, spec.target.coerceIn(spec.min, spec.max), spec.step, "%.1f\u00b0"),
             spec.mode, spec.mode, spec.modes)
         Spec.Stateless -> StatelessTemplate(entityId)
-        is Spec.ReadOnly -> null
     }
     // scene/button state is the last-activated timestamp: noise, so no status text
-    val text = when (spec) { is Spec.ReadOnly -> spec.text; Spec.Stateless -> ""; else -> state.replaceFirstChar { it.uppercase() } }
-    template?.let { b.setControlTemplate(it) }
+    val text = if (spec == Spec.Stateless) "" else state.replaceFirstChar { it.uppercase() }
+    b.setControlTemplate(template)
     return b.setStatus(Control.STATUS_OK).setStatusText(text + if (stale) " (cached)" else "").build()
 }
 
@@ -96,8 +93,8 @@ class ControlsService : ControlsProviderService() {
         for (s in app.store.servers.value) {
             val cache = entityCache(s.id).load()
             val pi = pi(s.id)
-            val areas = loadAreas(areaFile(s.id))
-            s.selectedEntities.forEach { emit((cache[it] ?: EntityState(it, "unknown")).toStateless(s.id, s.name, pi, areas[it])) }
+            val areas = loadAreas(areaFile(s.id)).areas
+            s.selectedEntities.filter(::isControllable).forEach { emit((cache[it] ?: EntityState(it, "unknown")).toStateless(s.id, s.name, pi, areas[it])) }
         }
     }.asPublisher(scope.coroutineContext)
 
@@ -119,7 +116,7 @@ class ControlsService : ControlsProviderService() {
         val pi = pi(server.id)
         val cache = entityCache(server.id)
         var states = cache.load()
-        var areas = loadAreas(areaFile(server.id))
+        var areas = loadAreas(areaFile(server.id)).areas
         fun controls(stale: Boolean = false, error: String? = null) = entityIds.mapNotNull { id ->
             (states[id] ?: if (error != null) EntityState(id, "unknown") else null)?.toControl(server.id, server.name, pi, stale, error, areas[id])
         }
@@ -142,7 +139,7 @@ class ControlsService : ControlsProviderService() {
                     cache.save(states)
                     controls().forEach { emit(it) }
                     // after the first live state: zones show up from the next emission on, no delay for the state
-                    if (!areasDone) { areasDone = true; areas = session.refreshAreas(areaFile(server.id)) }
+                    if (!areasDone) { areasDone = true; areas = session.refreshAreas(areaFile(server.id)).areas }
                     // removed in HA: tell the panel once instead of leaving it stale
                     entityIds.filter { it in before && it !in states }.forEach {
                         emit(EntityState(it, "unknown").toControl(server.id, server.name, pi, error = "removed", area = areas[it]))

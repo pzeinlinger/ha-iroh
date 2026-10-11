@@ -3,6 +3,7 @@ package dev.ha_iroh.app
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 import java.io.File
 import java.io.IOException
@@ -14,6 +15,8 @@ data class EntityState(
     val state: String,
     val attributes: JsonObject = JsonObject(emptyMap()),
 )
+
+fun EntityState.title() = (attributes["friendly_name"] as? JsonPrimitive)?.contentOrNull ?: entityId
 
 /** Control id on the wire: "serverId:entityId" (UUIDs and entity ids contain no colon). */
 data class ControlId(val serverId: String, val entityId: String) {
@@ -102,13 +105,34 @@ fun areaMap(areas: JsonArray, entities: JsonArray, devices: JsonArray): Map<Stri
     }.toMap()
 }
 
-/** Best-effort: fetch the three registries and persist entity -> area in [file]; returns the map (empty on any failure). */
-suspend fun Session.refreshAreas(file: File): Map<String, String> = try {
+/** Entities the picker hides: registry entry has entity_category (config/diagnostic), hidden_by or disabled_by. */
+fun hiddenEntities(entities: JsonArray): Set<String> = entities.mapNotNull {
+    val o = it.jsonObject
+    fun set(k: String) = (o[k] as? JsonPrimitive)?.contentOrNull != null
+    if (set("entity_category") || set("hidden_by") || set("disabled_by")) (o["entity_id"] as? JsonPrimitive)?.contentOrNull else null
+}.toSet()
+
+/** What the registries tell us about entities; one persisted file per server. */
+@Serializable
+data class Registry(val areas: Map<String, String> = emptyMap(), val hidden: Set<String> = emptySet())
+
+/** Best-effort: fetch the three registries and persist [Registry] in [file]; returns it (the stored one on any failure). */
+suspend fun Session.refreshAreas(file: File): Registry = try {
     suspend fun list(t: String) = sendCommand(buildJsonObject { put("type", t) })["result"]!!.jsonArray
-    val m = areaMap(list("config/area_registry/list"), list("config/entity_registry/list"), list("config/device_registry/list"))
-    writeAtomic(file, json.encodeToString(MapSerializer(String.serializer(), String.serializer()), m))
-    m
+    val entities = list("config/entity_registry/list")
+    Registry(areaMap(list("config/area_registry/list"), entities, list("config/device_registry/list")), hiddenEntities(entities))
+        .also { writeAtomic(file, json.encodeToString(it)) }
 } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { loadAreas(file) }
 
-fun loadAreas(file: File): Map<String, String> =
-    runCatching { json.decodeFromString(MapSerializer(String.serializer(), String.serializer()), file.readText()) }.getOrDefault(emptyMap())
+fun loadAreas(file: File): Registry = runCatching { json.decodeFromString<Registry>(file.readText()) }.getOrDefault(Registry())
+
+const val NO_AREA = "No area"
+
+/** Picker rows: registry-hidden dropped (unless still selected, so it can be deselected), filtered by [query], grouped by area ("No area" last), sorted by name. */
+fun pickerGroups(entities: Collection<EntityState>, reg: Registry, selected: Set<String>, query: String): List<Pair<String, List<EntityState>>> {
+    val q = query.trim()
+    return entities.filter { (it.entityId !in reg.hidden || it.entityId in selected) && (q.isEmpty() || it.title().contains(q, true) || it.entityId.contains(q, true)) }
+        .groupBy { reg.areas[it.entityId] ?: NO_AREA }
+        .map { (area, l) -> area to l.sortedBy { it.title().lowercase() } }
+        .sortedWith(compareBy({ it.first == NO_AREA }, { it.first.lowercase() }))
+}

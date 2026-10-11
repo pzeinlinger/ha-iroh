@@ -110,9 +110,9 @@ class ControlMappingTest {
         assertEquals(call("button", "press"), actionFor("button.a", on = true))
     }
 
-    @Test fun readOnly() {
-        assertEquals(Spec.ReadOnly("21.5 °C"), e("sensor.t", "21.5", """{"unit_of_measurement":"°C"}""").toSpec())
-        assertEquals(Spec.ReadOnly("on"), e("binary_sensor.d", "on").toSpec())
+    @Test fun sensorsAreNotControls() {
+        assertNull(e("sensor.t", "21.5", """{"unit_of_measurement":"°C"}""").toSpec())
+        assertNull(e("binary_sensor.d", "on").toSpec())
         assertNull(actionFor("sensor.t", on = true))
         assertNull(actionFor("binary_sensor.d", value = 1f))
     }

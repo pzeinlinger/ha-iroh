@@ -12,7 +12,6 @@ sealed class Spec(val deviceType: Int, val authRequired: Boolean = false) {
     data class ToggleRange(val on: Boolean, val range: Range) : Spec(range.type)
     data class Temperature(val target: Float, val min: Float, val max: Float, val step: Float, val mode: Int, val modes: Int) : Spec(T.TYPE_THERMOSTAT)
     object Stateless : Spec(T.TYPE_ROUTINE)
-    data class ReadOnly(val text: String) : Spec(T.TYPE_GENERIC_VIEWSTREAM)
 }
 
 data class ServiceCall(val domain: String, val service: String, val data: JsonObject = JsonObject(emptyMap()))
@@ -59,10 +58,12 @@ fun EntityState.toSpec(): Spec? {
             Spec.Temperature(attributes.num("temperature") ?: min, min, max, attributes.pos("target_temp_step") ?: 0.5f, mode, flags)
         }
         "scene", "script", "button" -> Spec.Stateless
-        "sensor", "binary_sensor" -> Spec.ReadOnly(listOfNotNull(state, (attributes["unit_of_measurement"] as? JsonPrimitive)?.contentOrNull).joinToString(" "))
         else -> null
     }
 }
+
+/** Domain has a Device Controls mapping (stale selections of dropped domains, e.g. sensor, are not published). */
+fun isControllable(entityId: String) = EntityState(entityId, "").toSpec() != null
 
 /** `unavailable` / `unknown` -> STATUS_ERROR text. Scenes/scripts/buttons are `unknown` until first used, so only `unavailable` counts. */
 fun EntityState.errorText() = state.takeIf { it == "unavailable" || (it == "unknown" && toSpec() != Spec.Stateless) }
