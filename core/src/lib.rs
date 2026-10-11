@@ -91,7 +91,9 @@ impl Core {
     /// One Endpoint per app. After `wipe_key` the app must construct a new `Core`.
     #[uniffi::constructor]
     pub fn new(data_dir: String, relay: RelayConfig) -> Result<Arc<Self>, CoreError> {
-        let key_path = PathBuf::from(data_dir).join("endpoint.key");
+        let data_dir = PathBuf::from(data_dir);
+        init_logging(&data_dir);
+        let key_path = data_dir.join("endpoint.key");
         let key = load_or_create_key(&key_path)?;
         let mut b = Endpoint::builder(presets::N0).secret_key(key);
         if let Some(m) = ha_iroh_proto::RelayConfig::from(relay)
@@ -190,6 +192,21 @@ impl Tunnel {
         self.cancel.cancel();
         self.conn.close(0u32.into(), b"bye");
     }
+
+    /// Human-readable snapshot of the selected network path, e.g. `direct 192.168.1.5:4433 12ms (+1 path)`.
+    pub fn conn_info(&self) -> String {
+        let paths = self.conn.paths();
+        let Some(p) = paths.iter().find(|p| p.is_selected()).or_else(|| paths.iter().next()) else {
+            return "no path".into();
+        };
+        let extra = paths.len().saturating_sub(1);
+        // TransportAddr's Display already carries an `ip:` / `relay:` prefix
+        let mut s = format!("{} {}ms", p.remote_addr(), p.rtt().as_millis());
+        if extra > 0 {
+            s.push_str(&format!(" (+{extra} path{})", if extra > 1 { "s" } else { "" }));
+        }
+        s
+    }
 }
 
 /// A closed-by-bridge connection means we are not (or no longer) on the allowlist.
@@ -254,4 +271,21 @@ async fn with_timeout<T>(ms: u32, f: impl std::future::Future<Output = T>) -> Re
     tokio::time::timeout(Duration::from_millis(ms as u64), f)
         .await
         .map_err(|_| CoreError::Timeout)
+}
+
+/// iroh logs to logcat (tag `ha_iroh_core`) on Android, stderr elsewhere.
+/// Filter: `HA_IROH_LOG` env, else `<data_dir>/log_filter` (e.g. via `adb shell run-as`), else `iroh=debug`.
+fn init_logging(data_dir: &std::path::Path) {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+        let filter = EnvFilter::try_from_env("HA_IROH_LOG")
+            .or_else(|_| std::fs::read_to_string(data_dir.join("log_filter")).map_err(|_| ()).and_then(|f| EnvFilter::try_new(f.trim()).map_err(|_| ())))
+            .unwrap_or_else(|_| EnvFilter::new("iroh=debug"));
+        #[cfg(target_os = "android")]
+        let _ = tracing_subscriber::registry().with(filter).with(tracing_android::layer("ha_iroh_core").unwrap()).try_init();
+        #[cfg(not(target_os = "android"))]
+        let _ = tracing_subscriber::registry().with(filter).with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr)).try_init();
+    });
 }
