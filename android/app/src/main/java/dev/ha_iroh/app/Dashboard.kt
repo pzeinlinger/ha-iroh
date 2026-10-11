@@ -49,6 +49,18 @@ window.externalApp = {
   revokeExternalAuth: p => $NATIVE.postMessage(JSON.stringify({method: "revokeExternalAuth", payload: p})),
   externalBus: p => $NATIVE.postMessage(JSON.stringify({method: "externalBus", payload: p})),
 };
+// HA scrolls an inner element in shadow DOM, so WebView.scrollY is always 0. SwipeRefreshLayout decides on touch-down, so the
+// value must be current *before* a gesture: hook `scroll` on whichever scroller gets touched and report on every scroll (flings too).
+const report = v => $NATIVE.postMessage(JSON.stringify({method: "canScrollUp", payload: String(v)}));
+const up = el => { for (let n = el; n; n = n.parentNode instanceof ShadowRoot ? n.parentNode.host : n.parentNode) if (n instanceof Element && n.scrollTop > 0) return true; return false; };
+const hooked = new WeakSet();
+document.addEventListener("touchstart", e => {
+  const path = e.composedPath();
+  report(up(path[0]));
+  for (const el of path) if (el instanceof Element && !hooked.has(el) && el.scrollHeight > el.clientHeight) {
+    hooked.add(el); el.addEventListener("scroll", () => report(up(el)), {passive: true});
+  }
+}, {capture: true, passive: true});
 """
 
 private fun String?.inOrigin(origin: String?) = this != null && origin != null && (this == origin || startsWith("$origin/"))
@@ -69,7 +81,7 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
     val scope = rememberCoroutineScope()
     var canBack by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val state = remember { object { val live = AtomicReference<Live?>(null); var job: Job? = null; var script: ScriptHandler? = null } }
+    val state = remember { object { val live = AtomicReference<Live?>(null); var job: Job? = null; var script: ScriptHandler? = null; @Volatile var canScrollUp = false /* ponytail: only the modern shim reports; the fallback interface never does, so refresh stays eager there */ } }
 
     val web = remember {
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true) // chrome://inspect over adb
@@ -91,7 +103,7 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
         SwipeRefreshLayout(ctx).apply {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             addView(web, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            setOnChildScrollUpCallback { _, _ -> web.scrollY > 0 }
+            setOnChildScrollUpCallback { _, _ -> state.canScrollUp || web.scrollY > 0 }
         }
     }
     val modern = remember {
@@ -150,7 +162,7 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
                 return true // never navigate this WebView away from the proxy origin
             }
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) { canBack = view.canGoBack() }
-            override fun onPageFinished(view: WebView, url: String?) { swipe.isRefreshing = false }
+            override fun onPageFinished(view: WebView, url: String?) { swipe.isRefreshing = false; state.canScrollUp = false }
             override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
                 Log.w(TAG, "renderer gone crash=${detail.didCrash()}"); error = "WebView renderer died; reopen the dashboard"; return true
             }
@@ -213,7 +225,8 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
                             if (isMainFrame) runCatching { json.parseToJsonElement(msg.data ?: "").jsonObject }.getOrNull()?.let { m ->
                                 val method = m["method"]?.jsonPrimitive?.content
                                 val payload = m["payload"]?.jsonPrimitive?.content
-                                if (method != null && payload != null) scope.launch { handle(method, payload) }
+                                if (method == "canScrollUp") state.canScrollUp = payload == "true"
+                                else if (method != null && payload != null) scope.launch { handle(method, payload) }
                             }
                         }
                         state.script = WebViewCompat.addDocumentStartJavaScript(web, SHIM, rules)
