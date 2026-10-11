@@ -5,19 +5,36 @@ on:
 permissions:
   contents: write
 jobs:
-  zip:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - {arch: x86_64, os: ubuntu-latest}
+          - {arch: aarch64, os: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
       - uses: actions/cache@v4
         with:
           path: target
-          key: bridge-${{ hashFiles('Cargo.lock') }}
-          restore-keys: bridge-
-      - run: ./scripts/release-zip.sh
+          key: bridge-${{ matrix.arch }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: bridge-${{ matrix.arch }}-
+      - run: ARCHES=${{ matrix.arch }} ZIP=0 ./scripts/release-zip.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.arch }}
+          path: custom_components/ha_iroh/bin/ha-iroh-bridge-${{ matrix.arch }}
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          merge-multiple: true
+          path: custom_components/ha_iroh/bin
+      - run: ARCHES= ./scripts/release-zip.sh
       - run: test "$(unzip -l dist/ha_iroh.zip | grep -cE ' (__init__.py|bin/ha-iroh-bridge-x86_64|bin/ha-iroh-bridge-aarch64)$')" = 3
       - uses: softprops/action-gh-release@v2
         with:
