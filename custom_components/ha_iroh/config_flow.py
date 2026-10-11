@@ -19,7 +19,7 @@ from homeassistant.helpers.selector import (
     QrErrorCorrectionLevel,
 )
 
-from .const import CONF_RELAY, DEFAULTS, DOMAIN
+from .const import CONF_BIND_PORT, CONF_RELAY, DEFAULTS, DOMAIN
 
 
 class HaIrohConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -73,9 +73,12 @@ class HaIrohOptionsFlow(OptionsFlow):
         if user_input is not None:
             relay = user_input[CONF_RELAY].strip()
             urls = [u.strip() for u in relay.split(",")]
-            if relay == "n0" or all(u.startswith(("http://", "https://")) for u in urls):
+            if not (relay == "n0" or all(u.startswith(("http://", "https://")) for u in urls)):
+                errors[CONF_RELAY] = "invalid_relay"
+            if user_input[CONF_BIND_PORT] != 0 and not 1024 <= user_input[CONF_BIND_PORT] <= 65535:
+                errors[CONF_BIND_PORT] = "invalid_port"
+            if not errors:
                 return self.async_create_entry(data=user_input)
-            errors[CONF_RELAY] = "invalid_relay"
             cur = user_input
         return self.async_show_form(
             step_id="settings",
@@ -83,6 +86,7 @@ class HaIrohOptionsFlow(OptionsFlow):
                 {
                     probatio.Required(CONF_NAME, default=cur[CONF_NAME]): str,
                     probatio.Required(CONF_RELAY, default=cur[CONF_RELAY]): str,
+                    probatio.Required(CONF_BIND_PORT, default=cur[CONF_BIND_PORT]): int,
                 }
             ),
             errors=errors,

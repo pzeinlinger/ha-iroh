@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 
 import pytest
 from unittest.mock import patch
@@ -141,3 +142,61 @@ async def test_exit_while_pending_raises(hass):
     with pytest.raises(ConnectionError):
         await bridge.command({"cmd": "list"})
     await _teardown(hass, entry, p)
+
+
+def _bridge(hass, options=None):
+    from custom_components.ha_iroh import bridge
+
+    entry = MockConfigEntry(domain=DOMAIN, data={}, options=options or {})
+    return bridge, bridge.BridgeProcess(hass, entry, lambda m: None)
+
+
+def test_bundled_binary_copied_and_executable(hass, monkeypatch, tmp_path):
+    mod, b = _bridge(hass)
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "ha-iroh-bridge-aarch64").write_bytes(b"ELF")
+    monkeypatch.setattr(mod, "__file__", str(tmp_path / "bridge.py"))
+    monkeypatch.setattr(mod.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(mod.shutil, "which", lambda n: None)
+    hass.config.config_dir = str(tmp_path / "cfg")
+    path = b._find_binary()
+    assert path == hass.config.path("ha_iroh", "bin", "ha-iroh-bridge")
+    assert open(path, "rb").read() == b"ELF" and os.access(path, os.X_OK)
+    # unchanged: no recopy
+    with patch.object(mod.shutil, "copy2", side_effect=AssertionError):
+        assert b._find_binary() == path
+    # changed source: replaced
+    src = tmp_path / "bin" / "ha-iroh-bridge-aarch64"
+    src.write_bytes(b"ELF2")
+    os.utime(src, (1, 1))
+    b._find_binary()
+    assert open(path, "rb").read() == b"ELF2" and os.access(path, os.X_OK)
+
+
+def test_missing_arch_binary_errors(hass, monkeypatch, tmp_path):
+    mod, b = _bridge(hass)
+    monkeypatch.setattr(mod, "__file__", str(tmp_path / "bridge.py"))
+    monkeypatch.setattr(mod.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(mod.shutil, "which", lambda n: None)
+    with pytest.raises(FileNotFoundError, match="x86_64"):
+        b._find_binary()
+
+
+@pytest.mark.parametrize("port,ok", [(0, True), (1024, True), (65535, True), (80, False), (70000, False)])
+async def test_options_bind_port(hass, port, ok):
+    entry = MockConfigEntry(domain=DOMAIN, data={}, options={})
+    entry.add_to_hass(hass)
+    r = await hass.config_entries.options.async_init(entry.entry_id)
+    r = await hass.config_entries.options.async_configure(r["flow_id"], {"next_step_id": "settings"})
+    r = await hass.config_entries.options.async_configure(
+        r["flow_id"], {"name": "HA", "relay": "n0", "bind_port": port}
+    )
+    assert (r["type"] == "create_entry") is ok
+    if not ok:
+        assert r["errors"] == {"bind_port": "invalid_port"}
+
+
+def test_bind_port_written_to_toml(hass, tmp_path):
+    _, b = _bridge(hass, {"bind_port": 4242})
+    hass.config.config_dir = str(tmp_path)
+    assert "bind_port = 4242\n" in open(b._write_config()).read()

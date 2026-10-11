@@ -26,15 +26,18 @@
         "title": "Settings",
         "data": {
           "name": "Bridge name",
-          "relay": "Relay"
+          "relay": "Relay",
+          "bind_port": "Bridge UDP port"
         },
         "data_description": {
-          "relay": "\"n0\" for the default relays, or comma-separated relay URLs."
+          "relay": "\"n0\" for the default relays, or comma-separated relay URLs.",
+          "bind_port": "Fixed UDP port (for a router port forward); 0 = random"
         }
       }
     },
     "error": {
-      "invalid_relay": "Use \"n0\" or comma-separated http(s) URLs."
+      "invalid_relay": "Use \"n0\" or comma-separated http(s) URLs.",
+      "invalid_port": "Use 0 or a port from 1024 to 65535."
     },
     "abort": {
       "bridge_unavailable": "The bridge is not running. Check the logs."
