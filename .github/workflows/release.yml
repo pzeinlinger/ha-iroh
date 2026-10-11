@@ -5,6 +5,10 @@ on:
     tags: ['v*']
 permissions:
   contents: write
+# a tag pushed right after a merge cancels the (duplicate) main-push run for the same commit
+concurrency:
+  group: ${{ github.sha }}
+  cancel-in-progress: true
 jobs:
   build:
     strategy:
