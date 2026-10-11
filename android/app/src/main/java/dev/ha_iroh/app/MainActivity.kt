@@ -1,6 +1,7 @@
 package dev.ha_iroh.app
 
 import android.Manifest
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -56,6 +57,14 @@ private sealed interface Screen {
 }
 
 class MainActivity : ComponentActivity() {
+    private var launched by mutableStateOf<Intent?>(null) // latest delivered intent, consumed by the composition
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        launched = intent
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val app = application as App
@@ -70,10 +79,15 @@ class MainActivity : ComponentActivity() {
                 var loaded by remember { mutableStateOf(false) }
                 LaunchedEffect(Unit) { app.store.init(); loaded = true }
                 // Start on the first logged-in server's dashboard; Back from the server list returns there.
-                var active by remember { mutableStateOf<String?>(null) } // last shown dashboard
+                var active by remember { mutableStateOf(intent.getStringExtra(EXTRA_SERVER_ID)) } // last shown dashboard
                 val loggedIn = servers.filter { it.refreshToken != null }
                 val home: Screen = (loggedIn.firstOrNull { it.id == active } ?: loggedIn.firstOrNull())?.let { Screen.Dashboard(it.id) } ?: Screen.List
                 var screen by remember { mutableStateOf<Screen?>(if (ticket != null) Screen.Add(ticket) else null) }
+                // Device Controls tap while the app is already open (the system may reuse this instance): jump to that server
+                LaunchedEffect(launched) {
+                    launched?.getStringExtra(EXTRA_SERVER_ID)?.let { id -> servers.firstOrNull { it.id == id } }?.let { screen = if (it.refreshToken != null) Screen.Dashboard(it.id) else Screen.Detail(it.id) }
+                    launched = null
+                }
                 val cur = screen ?: if (loaded) home else return@MaterialTheme
                 if (cur is Screen.Dashboard) {
                     LaunchedEffect(cur.id) { active = cur.id }
