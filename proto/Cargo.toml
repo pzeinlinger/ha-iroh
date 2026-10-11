@@ -2,6 +2,7 @@
 name = "ha_iroh_proto"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 iroh = { version = "1.3", default-features = false, features = ["tls-ring"] }

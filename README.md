@@ -163,3 +163,7 @@ Copy `custom_components/ha_iroh` into `<config>/custom_components/` and run `scr
 ### Releasing
 
 Push a `v*` tag. CI builds the musl bridges, the HACS zip and the signed APK and attaches them to a GitHub Release. Maintainers run `scripts/setup-signing.sh` once to create the signing key and GitHub secrets.
+
+## License
+
+[MIT](LICENSE)
