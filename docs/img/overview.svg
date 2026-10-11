@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="230" viewBox="0 0 760 230" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5b8def"/>
+    </marker>
+  </defs>
+  <rect width="760" height="230" rx="12" fill="#0f172a"/>
+
+  <!-- phone -->
+  <rect x="40" y="45" width="110" height="140" rx="14" fill="#1e293b" stroke="#334155" stroke-width="2"/>
+  <rect x="52" y="60" width="86" height="100" rx="6" fill="#0f172a"/>
+  <circle cx="95" cy="172" r="5" fill="#334155"/>
+  <g fill="#5b8def">
+    <rect x="60" y="70" width="32" height="20" rx="4"/>
+    <rect x="98" y="70" width="32" height="20" rx="4" opacity=".6"/>
+    <rect x="60" y="96" width="32" height="20" rx="4" opacity=".6"/>
+    <rect x="98" y="96" width="32" height="20" rx="4"/>
+    <rect x="60" y="122" width="70" height="28" rx="14" opacity=".35"/>
+  </g>
+  <text x="95" y="205" text-anchor="middle" fill="#e2e8f0" font-weight="600">Android app</text>
+  <text x="95" y="222" text-anchor="middle" fill="#94a3b8" font-size="12">controls · Assist · dashboard</text>
+
+  <!-- link -->
+  <line x1="160" y1="115" x2="490" y2="115" stroke="#5b8def" stroke-width="3" marker-start="url(#a)" marker-end="url(#a)"/>
+  <rect x="225" y="85" width="200" height="26" rx="13" fill="#1e3a8a"/>
+  <text x="325" y="103" text-anchor="middle" fill="#e2e8f0" font-size="13" font-weight="600">iroh · end-to-end encrypted</text>
+  <text x="325" y="140" text-anchor="middle" fill="#94a3b8" font-size="12">direct when possible, relay otherwise</text>
+  <text x="325" y="158" text-anchor="middle" fill="#94a3b8" font-size="12">no port forwarding · no VPN · no cloud account</text>
+
+  <!-- HA box -->
+  <rect x="500" y="45" width="220" height="140" rx="14" fill="#1e293b" stroke="#334155" stroke-width="2"/>
+  <text x="610" y="72" text-anchor="middle" fill="#e2e8f0" font-weight="600">Home Assistant</text>
+  <rect x="520" y="88" width="180" height="36" rx="8" fill="#0f172a" stroke="#5b8def" stroke-width="1.5"/>
+  <text x="610" y="111" text-anchor="middle" fill="#e2e8f0" font-size="13">ha-iroh bridge (integration)</text>
+  <line x1="610" y1="124" x2="610" y2="140" stroke="#64748b" stroke-width="2"/>
+  <rect x="520" y="140" width="180" height="30" rx="8" fill="#0f172a" stroke="#334155"/>
+  <text x="610" y="160" text-anchor="middle" fill="#cbd5e1" font-size="13">HA core · 127.0.0.1:8123</text>
+  <text x="610" y="205" text-anchor="middle" fill="#94a3b8" font-size="12">works on HA Container, no add-ons needed</text>
+</svg>
