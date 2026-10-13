@@ -55,6 +55,7 @@ class BridgeProcess:
         # JSON strings/arrays are valid TOML
         lines = {
             "ha_addr": f"127.0.0.1:{port}",
+            "ha_tls": bool(self.hass.config.api and self.hass.config.api.use_ssl),
             "secret_key_path": f"{d}/bridge.key",
             "allowlist_path": f"{d}/allowlist.toml",
             "relay": relay,

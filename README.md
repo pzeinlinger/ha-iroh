@@ -126,6 +126,7 @@ For HA on another host, or without HACS. Config (`ha-iroh-bridge.toml`, every ke
 
 ```toml
 ha_addr = "127.0.0.1:8123"
+ha_tls = false                           # true if HA itself serves TLS (http: ssl_certificate); cert not verified
 secret_key_path = "ha-iroh-bridge.key"   # generated 0600 on first run
 allowlist_path = "allowlist.toml"
 relay = "n0"                             # or ["https://relay.example/"]
