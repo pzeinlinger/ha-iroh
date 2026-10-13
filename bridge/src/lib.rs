@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use ha_iroh_proto::{
@@ -10,16 +10,64 @@ use ha_iroh_proto::{
 };
 use iroh::endpoint::{Connection, Incoming};
 use iroh::{Endpoint, EndpointId};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
 use serde::{Deserialize, Serialize};
 use tokio::io::{copy_bidirectional, join};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio_rustls::TlsConnector;
 use tracing::{info, warn};
+
+/// Accepts any upstream cert (`ha_tls` hop is loopback and HA's cert names a domain, not 127.0.0.1);
+/// handshake signatures are still checked.
+#[derive(Debug)]
+struct NoVerify(Arc<CryptoProvider>);
+
+impl ServerCertVerifier for NoVerify {
+    fn verify_server_cert(
+        &self,
+        _: &CertificateDer<'_>,
+        _: &[CertificateDer<'_>],
+        _: &ServerName<'_>,
+        _: &[u8],
+        _: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+    fn verify_tls12_signature(&self, m: &[u8], c: &CertificateDer<'_>, d: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, rustls::Error> {
+        verify_tls12_signature(m, c, d, &self.0.signature_verification_algorithms)
+    }
+    fn verify_tls13_signature(&self, m: &[u8], c: &CertificateDer<'_>, d: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, rustls::Error> {
+        verify_tls13_signature(m, c, d, &self.0.signature_verification_algorithms)
+    }
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.0.signature_verification_algorithms.supported_schemes()
+    }
+}
+
+fn tls_connector() -> &'static TlsConnector {
+    static C: OnceLock<TlsConnector> = OnceLock::new();
+    C.get_or_init(|| {
+        let p = Arc::new(rustls::crypto::ring::default_provider());
+        let cfg = ClientConfig::builder_with_provider(p.clone())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(NoVerify(p)))
+            .with_no_client_auth();
+        TlsConnector::from(Arc::new(cfg))
+    })
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub ha_addr: String,
+    /// HA serves TLS itself (`http: ssl_certificate`): wrap the upstream connection in TLS (cert unverified).
+    pub ha_tls: bool,
     pub secret_key_path: PathBuf,
     pub allowlist_path: PathBuf,
     pub relay: RelayConfig,
@@ -35,6 +83,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             ha_addr: "127.0.0.1:8123".into(),
+            ha_tls: false,
             secret_key_path: "ha-iroh-bridge.key".into(),
             allowlist_path: "allowlist.toml".into(),
             relay: RelayConfig::default(),
@@ -178,13 +227,22 @@ impl Bridge {
         while let Ok((send, recv)) = conn.accept_bi().await {
             let n = opened.fetch_add(1, Relaxed) + 1;
             info!(%peer, device, opened = n, closed = closed.load(Relaxed), "stream open");
-            let (ha, device, closed) = (cfg.ha_addr.clone(), device.clone(), closed.clone());
+            let (ha, tls, device, closed) = (cfg.ha_addr.clone(), cfg.ha_tls, device.clone(), closed.clone());
             tokio::spawn(async move {
                 // copy_bidirectional shuts down each writer at the other side's EOF
                 // (SendStream shutdown == finish()), so half-close propagates both ways.
+                // With ha_tls the shutdown sends close_notify, which asyncio treats as a full
+                // close: a client that half-closes before reading the reply loses it (browsers don't).
                 let r = async {
                     let mut tcp = TcpStream::connect(&ha).await?;
-                    copy_bidirectional(&mut join(recv, send), &mut tcp).await
+                    let mut io = join(recv, send);
+                    if tls {
+                        let host = ha.rsplit_once(':').map_or(&*ha, |h| h.0).trim_matches(['[', ']']).to_owned();
+                        let name = ServerName::try_from(host).map_err(std::io::Error::other)?;
+                        copy_bidirectional(&mut io, &mut tls_connector().connect(name, tcp).await?).await
+                    } else {
+                        copy_bidirectional(&mut io, &mut tcp).await
+                    }
                 }
                 .await;
                 let c = closed.fetch_add(1, Relaxed) + 1;
