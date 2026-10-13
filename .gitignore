@@ -14,3 +14,4 @@ custom_components/ha_iroh/bin/
 dist/
 *.jks
 .scratch/
+nvim.log
