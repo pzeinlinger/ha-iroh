@@ -1,11 +1,11 @@
 name: release
 on:
   push:
-    branches: [main]  # warms the caches: tag runs can only read caches saved on their own ref or the default branch, so the main run must finish
+    branches: [main]  # warms the caches: tag runs only read caches saved on their own ref or the default branch, so the main run must finish
     tags: ['v*']
 permissions:
   contents: write
-# per ref: a newer push to main cancels the older main run; a tag run never cancels the main run that warms its caches
+# per ref: a newer push to develop cancels the older develop run; a tag run never cancels another run
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: true
@@ -43,7 +43,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: apk
-      - run: sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${GITHUB_REF_NAME#v}\"/" custom_components/ha_iroh/manifest.json && grep -F "\"version\": \"${GITHUB_REF_NAME#v}\"" custom_components/ha_iroh/manifest.json  # stamp tag into the zip, manifest in git stays as is
+      - run: |  # stamp tag into the zip, manifest in git stays as is
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${GITHUB_REF_NAME#v}\"/" custom_components/ha_iroh/manifest.json
+          grep -F "\"version\": \"${GITHUB_REF_NAME#v}\"" custom_components/ha_iroh/manifest.json
       - run: ARCHES= ./scripts/release-zip.sh
       - run: test "$(unzip -l dist/ha_iroh.zip | grep -cE ' (__init__.py|bin/ha-iroh-bridge-x86_64|bin/ha-iroh-bridge-aarch64)$')" = 3
       - uses: softprops/action-gh-release@v2
@@ -67,7 +69,7 @@ jobs:
           key: apk-${{ hashFiles('Cargo.lock') }}
           restore-keys: apk-
       - run: command -v cargo-ndk || cargo install cargo-ndk
-      - uses: gradle/actions/setup-gradle@v4  # ~/.gradle deps + build cache; written on main, read-only on tags
+      - uses: gradle/actions/setup-gradle@v4  # ~/.gradle deps + build cache; written on develop, read-only on tags
       - run: |
           export ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME  # set by the runner image
           cargo ndk -t arm64-v8a -o android/app/src/main/jniLibs build -p ha_iroh_core --release
