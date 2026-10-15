@@ -11,7 +11,7 @@
   };
 
   # uniffi-bindgen is not packaged in nixpkgs; added with the uniffi ticket.
-  packages = [ pkgs.cargo-ndk ];
+  packages = [ pkgs.cargo-ndk pkgs.github-cli ];
 
   # Android SDK/NDK come from the system Android Studio install, not Nix.
   # NDK_HOME = newest installed NDK (empty until installed via SDK Manager).
