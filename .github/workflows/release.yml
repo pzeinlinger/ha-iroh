@@ -50,6 +50,7 @@ jobs:
       - run: test "$(unzip -l dist/ha_iroh.zip | grep -cE ' (__init__.py|bin/ha-iroh-bridge-x86_64|bin/ha-iroh-bridge-aarch64)$')" = 3
       - uses: softprops/action-gh-release@v2
         with:
+          prerelease: ${{ contains(github.ref_name, '-') }}  # v1.2.3-beta.1: Obtainium + HACS skip prereleases by default
           files: |
             dist/ha_iroh.zip
             ha-iroh-*.apk
