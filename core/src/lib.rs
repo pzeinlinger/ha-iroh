@@ -115,10 +115,16 @@ impl Core {
         RT.block_on(self.ep.network_change());
     }
 
-    /// Unpair: delete the persisted key and close the endpoint. Discard this `Core` afterwards.
+    /// Close the endpoint (home relay conn, probes, every tunnel). Discard this `Core` afterwards.
+    /// (Named `shutdown`: uniffi's generated `AutoCloseable.close()` would clash.)
+    pub fn shutdown(&self) {
+        RT.block_on(self.ep.close());
+    }
+
+    /// Unpair: delete the persisted key and [`Self::shutdown`].
     pub fn wipe_key(&self) {
         let _ = std::fs::remove_file(&self.key_path);
-        RT.block_on(self.ep.close());
+        self.shutdown();
     }
 
     pub fn pair(&self, ticket_uri: String, device_name: String) -> Result<BridgeInfo, CoreError> {

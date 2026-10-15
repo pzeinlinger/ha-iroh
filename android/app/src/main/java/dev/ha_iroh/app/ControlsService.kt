@@ -30,6 +30,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.jdk9.asPublisher
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
@@ -168,11 +170,12 @@ class ControlsService : ControlsProviderService() {
             }
             delay(RETRY_DELAYS_MS[attempt++])
         }
-    }
+    }.onStart { app.acquire() }.onCompletion { app.release() } // SystemUI keeps the service bound: hold the Core per live subscription, not per bind
 
     override fun performControlAction(controlId: String, action: ControlAction, consumer: Consumer<Int>) {
         scope.launch {
             var result = ControlAction.RESPONSE_FAIL
+            app.acquire()
             try {
                 val (sid, eid) = ControlId.parse(controlId)
                 val call = when (action) {
@@ -199,6 +202,7 @@ class ControlsService : ControlsProviderService() {
             } catch (e: Exception) {
                 Log.w("ControlsService", "action failed", e)
             } finally {
+                app.release()
                 consumer.accept(result) // FAIL unless the call succeeded
             }
         }

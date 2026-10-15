@@ -15,9 +15,12 @@
             </intent-filter>
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
-        <activity android:name=".AssistActivity" android:exported="false" android:theme="@style/Theme.Assist"
+        <!-- exported: third-party shortcut launchers (e.g. Essentials) start the shortcut intents themselves -->
+        <activity android:name=".AssistActivity" android:exported="true" android:theme="@style/Theme.Assist" android:label="@string/assist_text"
             android:excludeFromRecents="true" android:taskAffinity="" android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|keyboardHidden" />
+        <!-- own component for voice: some launchers start the shortcut's target class and drop its extras -->
+        <activity-alias android:name=".AssistVoice" android:targetActivity=".AssistActivity" android:exported="true" android:label="@string/assist_voice" />
         <service android:name=".AssistTile" android:exported="true" android:label="@string/assist_tile" android:icon="@drawable/ic_tile"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>

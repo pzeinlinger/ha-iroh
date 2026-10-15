@@ -3,7 +3,7 @@
         <intent android:action="android.intent.action.VIEW" android:targetPackage="dev.ha_iroh.app" android:targetClass="dev.ha_iroh.app.AssistActivity" />
     </shortcut>
     <shortcut android:shortcutId="assist_voice" android:icon="@drawable/ic_shortcut_assist_voice" android:shortcutShortLabel="@string/assist_voice">
-        <intent android:action="android.intent.action.VIEW" android:targetPackage="dev.ha_iroh.app" android:targetClass="dev.ha_iroh.app.AssistActivity">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="dev.ha_iroh.app" android:targetClass="dev.ha_iroh.app.AssistVoice">
             <extra android:name="voice" android:value="true" />
         </intent>
     </shortcut>
