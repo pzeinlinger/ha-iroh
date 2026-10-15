@@ -52,7 +52,7 @@ class AssistActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val extraId = intent.getStringExtra(EXTRA_SERVER_ID)
-        val voice = intent.getBooleanExtra(EXTRA_VOICE, false)
+        val voice = intent.getBooleanExtra(EXTRA_VOICE, false) || intent.component?.className?.endsWith(".AssistVoice") == true
         setContent { MaterialTheme { Sheet(extraId, voice) } }
     }
 
