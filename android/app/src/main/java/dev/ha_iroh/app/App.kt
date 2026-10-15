@@ -21,7 +21,7 @@ class App : Application() {
     @Synchronized
     fun core(): Core = _core ?: Core(filesDir.path, relay()).also { _core = it }
 
-    /** Started activities + live [ControlsService]s. At 0 nothing is visible: close the endpoint (relay conn, probes) so it stops waking the radio. */
+    /** Started activities + running [ControlsService] subscriptions/actions. At 0 nothing is visible: close the endpoint (relay conn, probes) so it stops waking the radio. */
     private var users = 0
 
     @Synchronized
