@@ -15,7 +15,8 @@
             </intent-filter>
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
-        <activity android:name=".AssistActivity" android:exported="false" android:theme="@style/Theme.Assist"
+        <!-- exported: third-party shortcut launchers (e.g. Essentials) start the shortcut intents themselves -->
+        <activity android:name=".AssistActivity" android:exported="true" android:theme="@style/Theme.Assist"
             android:excludeFromRecents="true" android:taskAffinity="" android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|keyboardHidden" />
         <service android:name=".AssistTile" android:exported="true" android:label="@string/assist_tile" android:icon="@drawable/ic_tile"
