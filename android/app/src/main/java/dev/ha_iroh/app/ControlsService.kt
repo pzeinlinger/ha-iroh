@@ -83,8 +83,14 @@ class ControlsService : ControlsProviderService() {
     private fun pi(serverId: String) = PendingIntent.getActivity(this, serverId.hashCode(),
         Intent(this, MainActivity::class.java).putExtra(EXTRA_SERVER_ID, serverId), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
+    override fun onCreate() {
+        super.onCreate()
+        app.acquire()
+    }
+
     override fun onDestroy() {
         scope.cancel() // flows' finally blocks close sessions + tunnels
+        app.release()
         super.onDestroy()
     }
 

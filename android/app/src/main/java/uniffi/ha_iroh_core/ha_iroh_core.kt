@@ -683,6 +683,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_ha_iroh_core_checksum_method_core_pair(
     ): Int
+    external fun uniffi_ha_iroh_core_checksum_method_core_shutdown(
+    ): Int
     external fun uniffi_ha_iroh_core_checksum_method_core_wipe_key(
     ): Int
     external fun uniffi_ha_iroh_core_checksum_method_stream_disconnect(
@@ -743,6 +745,8 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_ha_iroh_core_fn_method_core_pair(`ptr`: Long,`ticketUri`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_ha_iroh_core_fn_method_core_shutdown(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_ha_iroh_core_fn_method_core_wipe_key(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     external fun uniffi_ha_iroh_core_fn_clone_stream(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -910,7 +914,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_ha_iroh_core_checksum_method_core_pair() and 0xFFFF) != 52116) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_ha_iroh_core_checksum_method_core_wipe_key() and 0xFFFF) != 63096) {
+    if ((lib.uniffi_ha_iroh_core_checksum_method_core_shutdown() and 0xFFFF) != 52580) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_ha_iroh_core_checksum_method_core_wipe_key() and 0xFFFF) != 16490) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_ha_iroh_core_checksum_method_stream_disconnect() and 0xFFFF) != 52193) {
@@ -1342,7 +1349,13 @@ public interface CoreInterface {
     fun `pair`(`ticketUri`: kotlin.String, `deviceName`: kotlin.String): BridgeInfo
     
     /**
-     * Unpair: delete the persisted key and close the endpoint. Discard this `Core` afterwards.
+     * Close the endpoint (home relay conn, probes, every tunnel). Discard this `Core` afterwards.
+     * (Named `shutdown`: uniffi's generated `AutoCloseable.close()` would clash.)
+     */
+    fun `shutdown`()
+    
+    /**
+     * Unpair: delete the persisted key and [`Self::shutdown`].
      */
     fun `wipeKey`()
     
@@ -1524,7 +1537,23 @@ open class Core: Disposable, AutoCloseable, CoreInterface
 
     
     /**
-     * Unpair: delete the persisted key and close the endpoint. Discard this `Core` afterwards.
+     * Close the endpoint (home relay conn, probes, every tunnel). Discard this `Core` afterwards.
+     * (Named `shutdown`: uniffi's generated `AutoCloseable.close()` would clash.)
+     */override fun `shutdown`()
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_ha_iroh_core_fn_method_core_shutdown(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Unpair: delete the persisted key and [`Self::shutdown`].
      */override fun `wipeKey`()
         = 
     callWithHandle {
