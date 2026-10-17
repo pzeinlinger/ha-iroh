@@ -14,6 +14,7 @@ android {
         targetSdk = 37
         versionCode = System.getenv("VERSION_CODE")?.toInt() ?: 1
         versionName = System.getenv("VERSION_NAME") ?: "0.0.0-dev"
+        manifestPlaceholders["appLabel"] = "ha-iroh"
     }
     // Signed only when KEYSTORE_PATH is set (CI); otherwise release is unsigned.
     val keystore = System.getenv("KEYSTORE_PATH")
@@ -24,6 +25,11 @@ android {
             keyAlias = System.getenv("KEY_ALIAS")
             keyPassword = System.getenv("KEY_PASS")
         }
+    }
+    // Installs next to the release app (own identity + pairing). ponytail: static shortcuts still target the release package.
+    buildTypes.getByName("debug") {
+        applicationIdSuffix = ".debug"
+        manifestPlaceholders["appLabel"] = "ha-iroh debug"
     }
     buildFeatures { compose = true; buildConfig = true }
 }
