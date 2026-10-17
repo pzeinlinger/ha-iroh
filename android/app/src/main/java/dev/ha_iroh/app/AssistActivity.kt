@@ -112,6 +112,7 @@ class AssistActivity : ComponentActivity() {
         var assist by remember { mutableStateOf<Pair<HaClient, AssistSession>?>(null) } // one client per sheet session (client() opens a tunnel per call)
         var busy by remember { mutableStateOf(false) }
         var listening by remember { mutableStateOf(false) }
+        var status by remember { mutableStateOf<String?>(null) } // voice progress, so a slow HA (cold STT model) doesn't look like nothing happening
         var text by remember { mutableStateOf("") }
         var menu by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
@@ -146,7 +147,7 @@ class AssistActivity : ComponentActivity() {
 
         fun listen() {
             val s = server ?: return
-            busy = true; listening = true
+            busy = true; listening = true; status = "connecting…"
             val ch = Channel<ByteArray>(Channel.UNLIMITED).also { audio = it }
             job = scope.launch {
                 try {
@@ -159,11 +160,12 @@ class AssistActivity : ComponentActivity() {
                             is VoiceEvent.Reply -> { convId = ev.conversationId ?: convId; lines += Line(ev.speech.ifEmpty { "(no reply)" }, Kind.REPLY) }
                             is VoiceEvent.Error -> lines += Line(ev.message, Kind.ERROR)
                             is VoiceEvent.Tts -> tts = ev.url
-                            is VoiceEvent.VadEnd -> listening = false
+                            is VoiceEvent.Listening -> status = "listening…"
+                            is VoiceEvent.VadEnd -> { listening = false; status = "thinking…" }
                             else -> {}
                         }
                     }
-                    tts?.let { listening = false; play(client, it) }
+                    tts?.let { listening = false; status = "speaking…"; play(client, it) }
                 } catch (e: CancellationException) {
                     release()
                     throw e
@@ -171,7 +173,7 @@ class AssistActivity : ComponentActivity() {
                     Log.w("Assist", "listen failed", e)
                     lines += Line(e.message ?: e.toString(), Kind.ERROR)
                     if (e !is AssistError && e !is HaError) { release(); assist = null }
-                } finally { ch.close(); busy = false; listening = false }
+                } finally { ch.close(); busy = false; listening = false; status = null }
             }
         }
 
@@ -179,7 +181,7 @@ class AssistActivity : ComponentActivity() {
             if (it) listen() else lines += Line("microphone permission denied", Kind.ERROR)
         }
         fun mic() {
-            if (listening) audio?.close()
+            if (listening) { audio?.close(); status = "thinking…" }
             else if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) listen()
             else micPerm.launch(Manifest.permission.RECORD_AUDIO)
         }
@@ -216,6 +218,7 @@ class AssistActivity : ComponentActivity() {
                             )
                         }
                     }
+                    status?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
                     convId?.let { Text("conversation $it", style = MaterialTheme.typography.labelSmall) }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(text, { text = it }, Modifier.weight(1f), singleLine = true, placeholder = { Text("Ask Assist") })
