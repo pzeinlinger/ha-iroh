@@ -1,14 +1,19 @@
 package dev.ha_iroh.app
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.content.pm.PackageManager
 import android.util.Log
 import android.widget.Toast
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
+import android.webkit.PermissionRequest
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -87,7 +92,12 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
     val scope = rememberCoroutineScope()
     var canBack by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val state = remember { object { val live = AtomicReference<Live?>(null); var job: Job? = null; var script: ScriptHandler? = null; @Volatile var canScrollUp = false /* ponytail: only the modern shim reports; the fallback interface never does, so refresh stays eager there */ } }
+    val state = remember { object { val live = AtomicReference<Live?>(null); var job: Job? = null; var script: ScriptHandler? = null; @Volatile var canScrollUp = false /* ponytail: only the modern shim reports; the fallback interface never does, so refresh stays eager there */; var mic: PermissionRequest? = null } }
+    // Frontend Assist mic: ungranted, getUserMedia fails and HA rejects the run ("required key not provided @ data['input']['sample_rate']").
+    val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        state.mic?.run { if (ok) grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) else deny() }
+        state.mic = null
+    }
 
     val web = remember {
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true) // chrome://inspect over adb
@@ -95,6 +105,13 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
             webChromeClient = object : android.webkit.WebChromeClient() {
                 override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
                     Log.d(TAG, "console ${m.messageLevel()} ${m.sourceId()}:${m.lineNumber()} ${m.message()}"); return true
+                }
+                override fun onPermissionRequest(r: PermissionRequest) {
+                    if (PermissionRequest.RESOURCE_AUDIO_CAPTURE !in r.resources || !r.origin.toString().inOrigin(state.live.get()?.origin)) return r.deny()
+                    if (ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) return r.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
+                    state.mic?.deny()
+                    state.mic = r
+                    micPerm.launch(Manifest.permission.RECORD_AUDIO)
                 }
             }
             settings.javaScriptEnabled = true
