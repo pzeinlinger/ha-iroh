@@ -101,7 +101,10 @@ fun Login(app: App, server: Server, onCancel: () -> Unit, onDone: () -> Unit) {
         } catch (e: CancellationException) { close(); throw e
         } catch (e: Exception) { error = "Connect failed: ${e.userMessage()}"; loading = false }
     }
-    DisposableEffect(web) { onDispose { close(); web.destroy() } }
+    // Hold the Core while this screen exists: a password manager opening its own activity stops ours, and at 0 users
+    // App shuts the endpoint down, killing the tunnel under the page ("Failed to fetch" on submit).
+    // ponytail: a login left in the background keeps the endpoint up until the screen is disposed or the process dies.
+    DisposableEffect(web) { app.acquire(); onDispose { close(); web.destroy(); app.release() } }
 
     Scaffold(topBar = { TopAppBar({ Text("Log in to ${server.name}") }, navigationIcon = { BackArrow() }) }) { pad ->
         Box(Modifier.padding(pad).fillMaxSize().imePadding()) {
