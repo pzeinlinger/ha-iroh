@@ -26,7 +26,7 @@ android {
             keyPassword = System.getenv("KEY_PASS")
         }
     }
-    // Installs next to the release app (own identity + pairing). ponytail: static shortcuts still target the release package.
+    // Installs next to the release app (own identity + pairing). src/debug/res/xml/shortcuts.xml retargets the static shortcuts.
     buildTypes.getByName("debug") {
         applicationIdSuffix = ".debug"
         manifestPlaceholders["appLabel"] = "ha-iroh debug"
