@@ -156,7 +156,7 @@ class AssistActivity : ComponentActivity() {
                     var tts: String? = null
                     a.listen(ch, convId, s.pipelineId).collect { ev ->
                         when (ev) {
-                            is VoiceEvent.Transcript -> lines += Line(ev.text.ifEmpty { "(nothing heard)" }, Kind.USER)
+                            is VoiceEvent.Transcript -> { lines += Line(ev.text.ifEmpty { "(nothing heard)" }, Kind.USER); listening = false; status = "thinking…" } // not every pipeline sends stt-vad-end
                             is VoiceEvent.Reply -> { convId = ev.conversationId ?: convId; lines += Line(ev.speech.ifEmpty { "(no reply)" }, Kind.REPLY) }
                             is VoiceEvent.Error -> lines += Line(ev.message, Kind.ERROR)
                             is VoiceEvent.Tts -> tts = ev.url
