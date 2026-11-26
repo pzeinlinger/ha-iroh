@@ -122,10 +122,11 @@ class MainActivity : ComponentActivity() {
                     is Screen.Dashboard -> {
                         LaunchedEffect(s.id) { active = s.id }
                         var info by remember { mutableStateOf<List<String>?>(null) }
+                        var reload by remember { mutableIntStateOf(0) }
                         Scaffold(topBar = {
-                            DashboardBar(servers, s.id, info, { screen = if (it.refreshToken != null) Screen.Dashboard(it.id) else Screen.Detail(it.id) }, { screen = Screen.Settings })
+                            DashboardBar(servers, s.id, info, { screen = if (it.refreshToken != null) Screen.Dashboard(it.id) else Screen.Detail(it.id) }, { reload++ }, { screen = Screen.Settings })
                         }) { pad ->
-                            key(s.id) { Dashboard(app, s.id, { screen = Screen.Settings }, { screen = Screen.Detail(s.id) }, { info = it }, Modifier.padding(pad)) }
+                            key(s.id) { Dashboard(app, s.id, reload, { screen = Screen.Settings }, { screen = Screen.Detail(s.id) }, { info = it }, Modifier.padding(pad)) }
                         }
                     }
                     Screen.Settings -> SettingsScreen(app, home, { screen = Screen.Add() }, { screen = Screen.Detail(it) }, { screen = it })

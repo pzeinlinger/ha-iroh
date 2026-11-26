@@ -19,14 +19,14 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -60,18 +60,6 @@ window.externalApp = {
   revokeExternalAuth: p => $NATIVE.postMessage(JSON.stringify({method: "revokeExternalAuth", payload: p})),
   externalBus: p => $NATIVE.postMessage(JSON.stringify({method: "externalBus", payload: p})),
 };
-// HA scrolls an inner element in shadow DOM, so WebView.scrollY is always 0. SwipeRefreshLayout decides on touch-down, so the
-// value must be current *before* a gesture: hook `scroll` on whichever scroller gets touched and report on every scroll (flings too).
-const report = v => $NATIVE.postMessage(JSON.stringify({method: "canScrollUp", payload: String(v)}));
-const up = el => { for (let n = el; n; n = n.parentNode instanceof ShadowRoot ? n.parentNode.host : n.parentNode) if (n instanceof Element && n.scrollTop > 0) return true; return false; };
-const hooked = new WeakSet();
-document.addEventListener("touchstart", e => {
-  const path = e.composedPath();
-  report(up(path[0]));
-  for (const el of path) if (el instanceof Element && !hooked.has(el) && el.scrollHeight > el.clientHeight) {
-    hooked.add(el); el.addEventListener("scroll", () => report(up(el)), {passive: true});
-  }
-}, {capture: true, passive: true});
 """
 
 internal fun String?.inOrigin(origin: String?) = this != null && origin != null && (this == origin || startsWith("$origin/"))
@@ -86,13 +74,13 @@ private class Live(val tunnel: Tunnel, val proxy: LoopbackProxy, val client: HaC
 /** Main screen: the HA frontend of [serverId] through the loopback proxy (SPEC §8.6). */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () -> Unit, onInfo: (List<String>?) -> Unit = {}, modifier: Modifier = Modifier) {
+fun Dashboard(app: App, serverId: String, reload: Int, onSettings: () -> Unit, onRelogin: () -> Unit, onInfo: (List<String>?) -> Unit = {}, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     var canBack by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val state = remember { object { val live = AtomicReference<Live?>(null); var job: Job? = null; var script: ScriptHandler? = null; @Volatile var canScrollUp = false /* ponytail: only the modern shim reports; the fallback interface never does, so refresh stays eager there */; var mic: PermissionRequest? = null } }
+    val state = remember { object { val live = AtomicReference<Live?>(null); var job: Job? = null; var script: ScriptHandler? = null; var mic: PermissionRequest? = null } }
     // Frontend Assist mic: ungranted, getUserMedia fails and HA rejects the run ("required key not provided @ data['input']['sample_rate']").
     val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         state.mic?.run { if (ok) grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) else deny() }
@@ -117,16 +105,9 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
-        }
-    }
-    // Pull down at the top of the page = full refresh: new tunnel, new proxy, reload.
-    // WebView must be MATCH_PARENT: with wrap-content params Chromium resolves 100vh / min-height media queries to 0
-    // and the HA frontend's full-height pages (Settings, HACS) render blank.
-    val swipe = remember {
-        SwipeRefreshLayout(ctx).apply {
+            // MATCH_PARENT: with wrap-content params Chromium resolves 100vh / min-height media queries to 0
+            // and the HA frontend's full-height pages (Settings, HACS) render blank.
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            addView(web, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            setOnChildScrollUpCallback { _, _ -> state.canScrollUp || web.scrollY > 0 }
         }
     }
     val modern = remember {
@@ -185,7 +166,6 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
                 return true // never navigate this WebView away from the proxy origin
             }
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) { canBack = view.canGoBack() }
-            override fun onPageFinished(view: WebView, url: String?) { swipe.isRefreshing = false; state.canScrollUp = false }
             override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
                 Log.w(TAG, "renderer gone crash=${detail.didCrash()}"); error = "WebView renderer died; reopen the dashboard"; return true
             }
@@ -210,7 +190,8 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
         }
     }
 
-    DisposableEffect(owner, serverId) {
+    // [reload] bump = full refresh: dispose pauses, re-adding the observer replays ON_RESUME -> new tunnel, proxy, reload.
+    DisposableEffect(owner, serverId, reload) {
         fun pause() {
             state.job?.cancel()
             state.job = null
@@ -235,8 +216,8 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
                             } catch (t: Throwable) { tunnel.disconnect(); throw t }
                         }
                     } catch (e: CancellationException) { throw e
-                    } catch (e: ReloginRequired) { swipe.isRefreshing = false; onRelogin(); return@launch
-                    } catch (e: Exception) { swipe.isRefreshing = false; error = "Connect failed: ${e.userMessage()}"; return@launch }
+                    } catch (e: ReloginRequired) { onRelogin(); return@launch
+                    } catch (e: Exception) { error = "Connect failed: ${e.userMessage()}"; return@launch }
                     if (!isActive) {
                         state.live.getAndSet(null)?.let { withContext(NonCancellable + Dispatchers.IO) { it.close() } }
                         return@launch
@@ -248,8 +229,7 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
                             if (isMainFrame) runCatching { json.parseToJsonElement(msg.data ?: "").jsonObject }.getOrNull()?.let { m ->
                                 val method = m["method"]?.jsonPrimitive?.content
                                 val payload = m["payload"]?.jsonPrimitive?.content
-                                if (method == "canScrollUp") state.canScrollUp = payload == "true"
-                                else if (method != null && payload != null) scope.launch { handle(method, payload) }
+                                if (method != null && payload != null) scope.launch { handle(method, payload) }
                             }
                         }
                         state.script = WebViewCompat.addDocumentStartJavaScript(web, SHIM, rules)
@@ -262,14 +242,13 @@ fun Dashboard(app: App, serverId: String, onSettings: () -> Unit, onRelogin: () 
             if (e == Lifecycle.Event.ON_RESUME) { web.onResume(); start() }
             else if (e == Lifecycle.Event.ON_PAUSE) { pause(); web.onPause() }
         }
-        swipe.setOnRefreshListener { pause(); start() }
         owner.lifecycle.addObserver(observer)
-        onDispose { owner.lifecycle.removeObserver(observer); swipe.setOnRefreshListener(null); pause() }
+        onDispose { owner.lifecycle.removeObserver(observer); pause() }
     }
-    DisposableEffect(web) { onDispose { (swipe.parent as? ViewGroup)?.removeView(swipe); swipe.removeView(web); web.destroy() } }
+    DisposableEffect(web) { onDispose { (web.parent as? ViewGroup)?.removeView(web); web.destroy() } }
 
     Box(modifier) {
-        AndroidView({ swipe }, Modifier.fillMaxSize())
+        AndroidView({ web }, Modifier.fillMaxSize())
         error?.let { Text(it, Modifier.align(androidx.compose.ui.Alignment.Center)) }
     }
 }
@@ -291,13 +270,12 @@ fun pathSummary(paths: List<String>): String {
     return (if (m.groupValues[1] == "ip") "Direct" else "Relay") + " · ${m.groupValues[3]} ms" + if (paths.size > 1) " · ${paths.size} paths" else ""
 }
 
-/** Top bar: server name (tap = server switcher), path info subtitle, overflow -> Settings. */
+/** Top bar: server name (tap = server switcher), path info subtitle, refresh, settings. */
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun DashboardBar(servers: List<Server>, activeId: String, paths: List<String>?, onPick: (Server) -> Unit, onSettings: () -> Unit) {
+fun DashboardBar(servers: List<Server>, activeId: String, paths: List<String>?, onPick: (Server) -> Unit, onRefresh: () -> Unit, onSettings: () -> Unit) {
     val ctx = LocalContext.current
     var pick by remember { mutableStateOf(false) }
-    var more by remember { mutableStateOf(false) }
     TopAppBar(
         title = {
             Box {
@@ -315,10 +293,8 @@ fun DashboardBar(servers: List<Server>, activeId: String, paths: List<String>?, 
             }
         },
         actions = {
-            Box {
-                IconButton({ more = true }) { Icon(Icons.Filled.MoreVert, "More") }
-                DropdownMenu(more, { more = false }) { DropdownMenuItem({ Text("Settings") }, { more = false; onSettings() }) }
-            }
+            IconButton(onRefresh) { Icon(Icons.Filled.Refresh, "Refresh") }
+            IconButton(onSettings) { Icon(Icons.Filled.Settings, "Settings") }
         },
     )
 }
