@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.jdk9.asPublisher
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.*
 import java.io.File
 import java.io.IOException
@@ -90,15 +91,37 @@ class ControlsService : ControlsProviderService() {
         super.onDestroy()
     }
 
+    /** Every controllable entity of every logged-in server, fetched in parallel. */
     override fun createPublisherForAllAvailable(): java.util.concurrent.Flow.Publisher<Control> = flow {
         app.store.init()
-        for (s in app.store.servers.value) {
-            val cache = entityCache(s.id).load()
-            val pi = pi(s.id)
-            val areas = loadAreas(areaFile(s.id)).areas
-            s.selectedEntities.filter(::isControllable).forEach { emit((cache[it] ?: EntityState(it, "unknown")).toStateless(s.id, s.name, pi, areas[it])) }
+        emitAll(app.store.servers.value.filter { it.refreshToken != null }.map { s ->
+            flow {
+                val (states, reg) = available(s)
+                val pi = pi(s.id)
+                controllable(states, reg).forEach { emit(it.toStateless(s.id, s.name, pi, reg.areas[it.entityId])) }
+            }
+        }.merge())
+    }.onStart { app.acquire() }.onCompletion { app.release() }.asPublisher(scope.coroutineContext)
+
+    /** Live get_states + registries (both saved), else the last saved ones. */
+    private suspend fun available(server: Server): Pair<Map<String, EntityState>, Registry> {
+        val cache = entityCache(server.id)
+        return try {
+            withTimeout(10_000) { // ponytail: per server; SystemUI gives up loading after ~20 s
+                val client = app.manager.client(server)
+                try {
+                    val session = client.connect()
+                    val states = EntityDiff.parseStates(session.sendCommand(buildJsonObject { put("type", "get_states") }))
+                    cache.save(cache.load() + states)
+                    states to session.refreshAreas(areaFile(server.id))
+                } finally { client.close() }
+            }
+        } catch (e: Throwable) {
+            if (e is CancellationException && e !is TimeoutCancellationException) throw e
+            Log.w("ControlsService", "server ${server.id}: listing from cache", e)
+            cache.load() to loadAreas(areaFile(server.id))
         }
-    }.asPublisher(scope.coroutineContext)
+    }
 
     override fun createPublisherFor(controlIds: List<String>): java.util.concurrent.Flow.Publisher<Control> = flow {
         app.store.init()

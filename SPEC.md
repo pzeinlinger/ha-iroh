@@ -165,7 +165,7 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
 ## 8. Android app (`android/`)
 
 ### 8.0 Server model (multi-server)
-`Server { id (uuid), name, bridgeInfo, refreshToken (encrypted), selectedEntities, pipelineId?, isDefaultAssist }`, stored as one Tink-encrypted JSON blob (AES-GCM, key in Keystore) under `filesDir`.
+`Server { id (uuid), name, bridgeInfo, refreshToken (encrypted), pipelineId?, isDefaultAssist }`, stored as one Tink-encrypted JSON blob (AES-GCM, key in Keystore) under `filesDir`.
 - "Add server" runs the pairing + login flow; the list is managed in settings.
 - `ServerManager` lazily creates one `HaClient` per server and tears it down when unused.
 
@@ -186,7 +186,7 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
    - The `homeassistant://auth-callback?code=…` navigation is intercepted in `shouldOverrideUrlLoading`; `POST /auth/token` with `grant_type=authorization_code` → access + refresh token
    - WebView cookies are cleared afterwards
 4. Store the refresh token encrypted (Keystore-backed Tink AEAD, see §8.0).
-5. Entity picker: list the supported domains and let the user choose which appear in Device Controls. The Android panel also has its own favorites UI.
+5. Device Controls: every supported entity of each logged-in server (registry-hidden, disabled and config/diagnostic ones left out) is offered directly; choosing favorites happens in the Android panel's own UI.
 
 ### 8.3 HaClient
 - On every connect:
@@ -272,7 +272,7 @@ class LoopbackProxy { fun port(): UShort; fun token(): String; fun stop() }
 
 ### 8.7 Settings
 - Server list: add / rename / unpair / re-login per server, default Assist server
-- Per server: entity selection, pipeline picker
+- Per server: pipeline picker
 - Relay override (n0 / custom URLs)
 - Show own EndpointId
 

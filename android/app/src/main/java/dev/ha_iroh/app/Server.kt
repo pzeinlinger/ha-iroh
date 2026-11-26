@@ -25,7 +25,6 @@ data class Server(
     val bridgeInfoName: String,
     val bridgeInfoJson: String,
     val refreshToken: String? = null,
-    val selectedEntities: List<String> = emptyList(),
     val pipelineId: String? = null,
     val isDefaultAssist: Boolean = false,
 ) {
