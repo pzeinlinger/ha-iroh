@@ -20,7 +20,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ha_iroh_proto = { path = "../proto" }
 # no portmapper/metrics on Android; bridge keeps iroh defaults
-iroh = { version = "1.3", default-features = false, features = ["tls-ring"] }
+iroh = { version = "1.5", default-features = false, features = ["tls-ring"] }
 uniffi = "0.32"
 tokio = { version = "1", features = ["rt-multi-thread", "io-util", "sync", "time", "net", "macros"] }
 thiserror = "2"
