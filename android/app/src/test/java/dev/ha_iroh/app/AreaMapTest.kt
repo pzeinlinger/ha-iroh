@@ -33,15 +33,8 @@ class AreaMapTest {
         f.delete()
     }
 
-    @Test fun pickerGroupsAreaOrderHiddenAndSearch() {
-        fun st(id: String, name: String) = EntityState(id, "on", json.parseToJsonElement("""{"friendly_name":"$name"}""").jsonObject)
-        val all = listOf(st("light.b", "Beta"), st("light.a", "alpha"), st("switch.x", "Plug"), st("light.h", "Hidden"), st("light.k", "Kettle"))
-        val reg = Registry(mapOf("light.b" to "Kitchen", "light.a" to "Kitchen", "light.k" to "Attic"), setOf("light.h"))
-        val g = pickerGroups(all, reg, emptySet(), "")
-        assertEquals(listOf("Attic", "Kitchen", NO_AREA), g.map { it.first })
-        assertEquals(listOf("light.a", "light.b"), g[1].second.map { it.entityId })
-        assertEquals(listOf("switch.x"), g[2].second.map { it.entityId }) // light.h hidden
-        assertTrue(pickerGroups(all, reg, setOf("light.h"), "").any { g -> g.second.any { it.entityId == "light.h" } })
-        assertEquals(listOf("light.k"), pickerGroups(all, reg, emptySet(), "KET").flatMap { it.second }.map { it.entityId })
+    @Test fun controllableDropsHiddenAndUnmapped() {
+        val all = listOf("light.a", "switch.x", "light.h", "sensor.t").associateWith { EntityState(it, "on") }
+        assertEquals(listOf("light.a", "switch.x"), controllable(all, Registry(hidden = setOf("light.h"))).map { it.entityId })
     }
 }

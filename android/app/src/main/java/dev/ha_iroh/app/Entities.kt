@@ -105,7 +105,7 @@ fun areaMap(areas: JsonArray, entities: JsonArray, devices: JsonArray): Map<Stri
     }.toMap()
 }
 
-/** Entities the picker hides: registry entry has entity_category (config/diagnostic), hidden_by or disabled_by. */
+/** Entities Device Controls hides: registry entry has entity_category (config/diagnostic), hidden_by or disabled_by. */
 fun hiddenEntities(entities: JsonArray): Set<String> = entities.mapNotNull {
     val o = it.jsonObject
     fun set(k: String) = (o[k] as? JsonPrimitive)?.contentOrNull != null
@@ -126,13 +126,5 @@ suspend fun Session.refreshAreas(file: File): Registry = try {
 
 fun loadAreas(file: File): Registry = runCatching { json.decodeFromString<Registry>(file.readText()) }.getOrDefault(Registry())
 
-const val NO_AREA = "No area"
-
-/** Picker rows: registry-hidden dropped (unless still selected, so it can be deselected), filtered by [query], grouped by area ("No area" last), sorted by name. */
-fun pickerGroups(entities: Collection<EntityState>, reg: Registry, selected: Set<String>, query: String): List<Pair<String, List<EntityState>>> {
-    val q = query.trim()
-    return entities.filter { (it.entityId !in reg.hidden || it.entityId in selected) && (q.isEmpty() || it.title().contains(q, true) || it.entityId.contains(q, true)) }
-        .groupBy { reg.areas[it.entityId] ?: NO_AREA }
-        .map { (area, l) -> area to l.sortedBy { it.title().lowercase() } }
-        .sortedWith(compareBy({ it.first == NO_AREA }, { it.first.lowercase() }))
-}
+/** What Device Controls offers: every entity with a mapping, minus registry-hidden (config/diagnostic, hidden, disabled). */
+fun controllable(states: Map<String, EntityState>, reg: Registry) = states.values.filter { isControllable(it.entityId) && it.entityId !in reg.hidden }

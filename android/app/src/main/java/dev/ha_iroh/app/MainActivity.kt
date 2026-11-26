@@ -19,14 +19,11 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -43,7 +40,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -78,7 +74,6 @@ private sealed interface Screen {
     data class Add(val uri: String = "") : Screen
     data class Login(val server: Server) : Screen
     data class Detail(val id: String) : Screen
-    data class Entities(val id: String) : Screen
     data class Dashboard(val id: String) : Screen
 }
 
@@ -133,7 +128,6 @@ class MainActivity : ComponentActivity() {
                     is Screen.Add -> AddServer(app, s.uri, { screen = Screen.Settings }) { screen = it }
                     is Screen.Login -> Login(app, s.server, { screen = Screen.Detail(s.server.id) }) { screen = Screen.Detail(s.server.id) }
                     is Screen.Detail -> Detail(app, s.id, { screen = Screen.Settings }) { screen = it }
-                    is Screen.Entities -> EntityPicker(app, s.id) { screen = Screen.Detail(s.id) }
                 }
             }
         }
@@ -458,13 +452,6 @@ private fun Detail(app: App, id: String, onBack: () -> Unit, onNavigate: (Screen
                 supportingContent = { Text(pipelines?.firstOrNull { it.id == server.pipelineId }?.name ?: if (server.pipelineId == null) "HA preferred" else "Custom") },
                 trailingContent = { if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) },
             )
-            Section("Device Controls")
-            ListItem(
-                { Text("Choose entities") },
-                Modifier.clickable(enabled = loggedIn) { onNavigate(Screen.Entities(id)) },
-                supportingContent = { Text("${server.selectedEntities.count(::isControllable)} selected") },
-                trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
-            )
             Section("Danger zone")
             ListItem(
                 { Text("Unpair", color = MaterialTheme.colorScheme.error) },
@@ -528,94 +515,6 @@ private fun Detail(app: App, id: String, onBack: () -> Unit, onNavigate: (Screen
             },
             dismissButton = { TextButton({ dialog = Dlg.None }) { Text("Cancel") } },
         )
-    }
-}
-
-private val DOMAIN_ICON = mapOf(
-    "light" to R.drawable.ic_light, "switch" to R.drawable.ic_switch, "fan" to R.drawable.ic_fan, "climate" to R.drawable.ic_climate)
-// ponytail: no extended icon set; the rest reuse material-icons-core glyphs
-private val CORE_ICON = mapOf<String, ImageVector>("input_boolean" to Icons.Filled.Check, "cover" to Icons.Filled.KeyboardArrowUp, "lock" to Icons.Filled.Lock,
-    "scene" to Icons.Filled.PlayArrow, "script" to Icons.Filled.PlayArrow, "button" to Icons.Filled.PlayArrow)
-
-@Composable
-private fun DomainIcon(domain: String) {
-    val tint = MaterialTheme.colorScheme.onSurfaceVariant
-    DOMAIN_ICON[domain]?.let { Icon(painterResource(it), null, tint = tint) } ?: Icon(CORE_ICON[domain] ?: Icons.Filled.Info, null, tint = tint)
-}
-
-/** Pick which entities (any supported domain) show up in Device Controls; also seeds the state cache. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun EntityPicker(app: App, id: String, onBack: () -> Unit) {
-    BackHandler(onBack = onBack)
-    val server = app.store.servers.collectAsState().value.firstOrNull { it.id == id } ?: return
-    var entities by remember { mutableStateOf<List<EntityState>?>(null) }
-    var reg by remember { mutableStateOf(Registry()) }
-    var err by remember { mutableStateOf("") }
-    var query by remember { mutableStateOf("") }
-    LaunchedEffect(id) {
-        var client: HaClient? = null
-        try {
-            client = app.manager.client(server)
-            val session = client.connect()
-            val all = EntityDiff.parseStates(session.sendCommand(buildJsonObject { put("type", "get_states") }))
-                .filterValues { it.toSpec() != null }
-            withContext(Dispatchers.IO) { app.entityCache(id).let { it.save(it.load() + all) } }
-            reg = withContext(Dispatchers.IO) { loadAreas(app.areaFile(id)) } // last known, until the refresh below lands
-            entities = all.values.toList()
-            reg = withContext(Dispatchers.IO) { session.refreshAreas(app.areaFile(id)) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Throwable) {
-            err = "Error: ${e.userMessage()}"
-        } finally {
-            withContext(NonCancellable + Dispatchers.IO) { client?.close() }
-        }
-    }
-    val scope = rememberCoroutineScope()
-    val selected = server.selectedEntities.toSet()
-    val groups = remember(entities, reg, selected, query) { pickerGroups(entities.orEmpty(), reg, selected, query) }
-    val visible = groups.flatMap { g -> g.second.map { it.entityId } }
-    fun setAll(ids: List<String>, on: Boolean) {
-        scope.launch { app.store.update(id) { it.copy(selectedEntities = if (on) (it.selectedEntities + ids).distinct() else it.selectedEntities - ids.toSet()) } }
-    }
-
-    Scaffold(topBar = { TopAppBar({ Text("Device Controls") }, navigationIcon = { BackArrow() }) }) { pad ->
-        Column(Modifier.padding(pad)) {
-            OutlinedTextField(
-                query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), singleLine = true,
-                placeholder = { Text("Search") }, leadingIcon = { Icon(Icons.Filled.Search, null) },
-                trailingIcon = { if (query.isNotEmpty()) IconButton({ query = "" }) { Icon(Icons.Filled.Close, "Clear") } },
-            )
-            if (entities == null && err.isEmpty()) Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-            if (err.isNotEmpty()) Text(err, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
-            if (entities != null && groups.isEmpty()) Text("No matching entities", Modifier.padding(16.dp))
-            LazyColumn {
-                if (visible.isNotEmpty()) item("all") {
-                    ListItem({ Text("Select all") }, trailingContent = { Switch(visible.all { it in selected }, { setAll(visible, it) }) })
-                }
-                groups.forEach { (area, list) ->
-                    val ids = list.map { it.entityId }
-                    val all = ids.all { it in selected }
-                    item("h:$area") {
-                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Section(area, Modifier)
-                            TextButton({ setAll(ids, !all) }) { Text(if (all) "Clear" else "Select all") }
-                        }
-                    }
-                    items(list, key = { it.entityId }) { e ->
-                        val on = e.entityId in selected
-                        ListItem(
-                            headlineContent = { Text(e.title()) },
-                            supportingContent = { Text(e.entityId) },
-                            leadingContent = { DomainIcon(domainOf(e.entityId)) },
-                            trailingContent = { Switch(on, { setAll(listOf(e.entityId), it) }) },
-                            modifier = Modifier.clickable { setAll(listOf(e.entityId), !on) },
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
